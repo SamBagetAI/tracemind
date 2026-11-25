@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { activeMs, costOf } from "../src/core/pricing.ts";
-import { activeLabel, byDay, dayLabel, dollars, sentence, tokens } from "../web/src/lib/diary";
+import { activeLabel, byDay, dayLabel, dollars, sentence, tokens, worthALook } from "../web/src/lib/diary";
 
 describe("diary sentences", () => {
   it("says a clean session ran clean", () => {
@@ -49,6 +49,16 @@ describe("diary sentences", () => {
     const parts = sentence({ toolErrors: 1, issues: [{ what: "an error without a name yet", seq: 3, key: "k", named: false }] });
     expect(parts.some((p) => "mark" in p)).toBe(false);
     expect(parts.map((p) => ("text" in p ? p.text : "")).join("")).toBe("1 failed call: an error without a name yet.");
+  });
+});
+
+describe("worth a look", () => {
+  it("picks the sessions with the most failed calls, longer first on a tie, never a clean one", () => {
+    const s = (id: string, toolErrors: number, activeMs: number) => ({ id, toolErrors, activeMs, issues: [] });
+    const { top, rest } = worthALook([s("clean", 0, 9e6), s("a", 2, 1e3), s("b", 26, 1e6), s("c", 8, 5e6), s("d", 8, 6e6)]);
+    expect(top.map((x) => x.id)).toEqual(["b", "d", "c"]);
+    expect(rest.map((x) => x.id)).toEqual(["clean", "a"]);
+    expect(worthALook([s("clean", 0, 1)]).top).toEqual([]);
   });
 });
 

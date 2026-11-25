@@ -529,6 +529,9 @@ Of three light feed mocks (Diary, Strips, Week), the Diary was chosen.
   and active time, and one sentence: "8 failed calls: Refused by the auto-mode classifier, Exited with
   an error code and 3 more." What went wrong has a highlighter mark, and opens its issue.
 - "2 fixes to review" sits under the numbers when there are any. The fix cards stay on the Fixes page.
+- Day by day for every session got tedious (25 Nov). Now only the three sessions **worth a look** are
+  told (the most failed calls, the longer first on a tie, never a clean one), each with its day; the
+  rest are one line, "13 other sessions (5 ran clean)", that opens them day by day.
 
 **Active time** counts the gaps between steps, each up to 15 minutes, so a session left open overnight
 is not 17 hours of work (`src/core/pricing.ts`).

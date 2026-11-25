@@ -76,3 +76,17 @@ export function tokens(n: number): string {
 export function dollars(n: number): string {
   return n >= 10 ? `$${Math.round(n).toLocaleString("en-US")}` : `$${n.toFixed(2)}`;
 }
+
+/**
+ * The sessions worth a look: the ones with the most failed calls (the longer one first on a tie),
+ * at most `n`, never a clean one. The rest are counted, not listed.
+ */
+export function worthALook<T extends Pick<Session, "toolErrors" | "activeMs"> & { issues?: SessionIssue[] }>(sessions: T[], n = 3): { top: T[]; rest: T[] } {
+  const bad = (s: T) => s.toolErrors > 0 || (s.issues?.length ?? 0) > 0;
+  const top = sessions
+    .filter(bad)
+    .sort((a, b) => b.toolErrors - a.toolErrors || b.activeMs - a.activeMs)
+    .slice(0, n);
+  const picked = new Set(top);
+  return { top, rest: sessions.filter((s) => !picked.has(s)) };
+}
