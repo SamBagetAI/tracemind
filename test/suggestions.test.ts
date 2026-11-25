@@ -3,9 +3,9 @@
  * Claude Code settings, undone exactly, and refused when the request does not come from the local
  * app on localhost.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parseClaudeSession } from "../src/core/parse-claude.ts";
 import { createApp } from "../src/server/app.ts";
 import { projectRoot, sessionContext } from "../src/server/suggestions.ts";
@@ -13,6 +13,7 @@ import { openSqlite } from "../src/store/db.ts";
 import { issueGroups } from "../src/store/insights.ts";
 import { Store } from "../src/store/store.ts";
 
+let root: string;
 let claudeDir: string;
 let project: string;
 
@@ -47,7 +48,7 @@ beforeEach(() => {
   // Not in the system temp folder: on Linux that is /tmp, which Tracemind rightly treats as scratch
   // space rather than a project (projectRoot), so project suggestions would not appear.
   mkdirSync(join(process.cwd(), ".test-tmp"), { recursive: true });
-  const root = mkdtempSync(join(process.cwd(), ".test-tmp", "tm-sugg-"));
+  root = mkdtempSync(join(process.cwd(), ".test-tmp", "tm-sugg-"));
   claudeDir = join(root, ".claude");
   project = join(root, "shop");
   mkdirSync(claudeDir, { recursive: true });
@@ -57,6 +58,8 @@ beforeEach(() => {
   process.env.CLAUDE_CONFIG_DIR = claudeDir;
   process.env.TRACEMIND_HOME = join(root, ".tracemind");
 });
+
+afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 describe("suggestions", () => {
   it("are made from what keeps going wrong, pointing at the right files", async () => {

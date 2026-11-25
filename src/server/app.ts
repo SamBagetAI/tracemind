@@ -63,13 +63,15 @@ function sameOrigin(c: Context): boolean {
   }
 }
 
+/** The URL's host comes from the request's Host header: a page on another name that resolves to
+ *  this machine (DNS rebinding) does not get a local name here. */
+const LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]", "::1"];
+const localHost = (c: Context) => LOCAL_HOSTS.includes(new URL(c.req.url).hostname);
+
 /** Changing files on this machine: only from the local app, asked for by this page on localhost. */
 function localWrite(c: Context, mode: "local" | "server"): string | null {
   if (mode !== "local") return "Applying suggestions works in the local app (tracemind ui), not on a shared server.";
-  // The URL's host comes from the request's Host header: a page on another name that resolves to
-  // this machine (DNS rebinding) is refused here.
-  const host = new URL(c.req.url).hostname;
-  if (!["localhost", "127.0.0.1", "[::1]", "::1"].includes(host)) return "forbidden";
+  if (!localHost(c)) return "forbidden";
   if (!sameOrigin(c) || !(c.req.header("content-type") ?? "").includes("application/json")) return "forbidden";
   return null;
 }
@@ -88,6 +90,12 @@ export function createApp(opts: AppOptions) {
     c.header("referrer-policy", "same-origin");
     c.header("x-frame-options", "DENY");
   });
+
+  // The local app has no sign-in: it answers only to a localhost name, so a web page that re-points
+  // its own domain at this machine (DNS rebinding) can't read sessions or change anything.
+  if (mode === "local") {
+    app.use("*", async (c, next) => (localHost(c) ? next() : c.text("Forbidden", 403)));
+  }
 
   app.get("/healthz", (c) => c.json({ ok: true }));
 
