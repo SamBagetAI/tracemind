@@ -117,8 +117,10 @@ export function createApp(opts: AppOptions) {
 
   // ---- first admin token, once ----
   app.post("/api/setup", async (c) => {
-    if (mode !== "server" || !opts.setupSecret) return c.json({ error: "setup is off" }, 404);
-    if (c.req.header("x-setup-secret") !== opts.setupSecret) return c.json({ error: "wrong setup secret" }, 403);
+    // Trimmed: a secret pasted into a host's settings often keeps a trailing newline.
+    const secret = opts.setupSecret?.trim();
+    if (mode !== "server" || !secret) return c.json({ error: "setup is off" }, 404);
+    if (c.req.header("x-setup-secret")?.trim() !== secret) return c.json({ error: "wrong setup secret" }, 403);
     if ((await store.tokenCount()) > 0) return c.json({ error: "this server is already set up" }, 409);
     const body = await c.req.json().catch(() => ({}));
     const workspace = String(body.workspace ?? "").trim();
