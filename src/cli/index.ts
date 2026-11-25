@@ -203,7 +203,7 @@ async function main(argv: string[]) {
         const input = JSON.parse((await readStdin()) || "{}");
         const cwd: string = input.cwd ?? process.cwd();
         const store = await openStore();
-        const { sessionContext } = await import("../server/suggestions.ts");
+        const { sessionContext } = await import("../server/brief.ts");
         const text = await sessionContext(store, WS, cwd);
         await store.db.close();
         if (text) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: text } }));
