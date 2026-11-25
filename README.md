@@ -42,9 +42,17 @@ tracemind setup mcp
 
 Then ask Claude "what keeps going wrong in this repo?" or "show me the fix for the refused commands".
 
+## Share it with a team
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FSamBagetAI%2Ftracemind&project-name=tracemind&repository-name=tracemind&env=DATABASE_URL,TRACEMIND_SETUP_SECRET&envDescription=DATABASE_URL%3A+a+Postgres+connection+string+%28Neon+works%29.+TRACEMIND_SETUP_SECRET%3A+any+long+random+string,+used+once+to+create+the+first+admin.&envLink=https%3A%2F%2Fgithub.com%2FSamBagetAI%2Ftracemind%2Fblob%2Fmain%2Fdocs%2Fguide.md%23shared-server)
+
+The same app runs as a shared server on Postgres: each person sends their sessions to it and signs
+in with a token. The button asks for a Postgres connection string and a setup secret; the
+[guide](docs/guide.md#shared-server) has the three commands that follow.
+
 ## More
 
-The [guide](docs/guide.md) covers the shared server for a team, routines, every MCP tool, how fixes
+The [guide](docs/guide.md) covers routines, every MCP tool, how fixes
 work, what counts as an issue, and privacy. Try the UI on made-up data with `scripts/demo.mjs`.
 
 MIT license.
