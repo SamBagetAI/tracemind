@@ -3,8 +3,21 @@
   "buildCommand": "pnpm build",
   "outputDirectory": "dist/web",
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api" },
-    { "source": "/healthz", "destination": "/api" },
-    { "source": "/(.*)", "destination": "/index.html" }
+    {
+      "source": "/api/(.*)",
+      "destination": "/api"
+    },
+    {
+      "source": "/healthz",
+      "destination": "/api"
+    },
+    {
+      "source": "/mcp",
+      "destination": "/api"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
   ]
 }

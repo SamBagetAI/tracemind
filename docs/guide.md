@@ -23,9 +23,10 @@ sessions. `tracemind setup claude-code --project` adds the hooks to one repo onl
 
 The server is the same app on Postgres, with workspaces and tokens.
 
-1. Deploy this repo to Vercel (or run `tracemind serve` anywhere Node runs) with
-   `DATABASE_URL` (a Postgres database, e.g. Neon) and `TRACEMIND_SETUP_SECRET` (any long
-   random string).
+1. Deploy it: the **Deploy with Vercel** button in the README clones this repo into your Vercel
+   account and asks for `DATABASE_URL` (a Postgres database, e.g. Neon) and
+   `TRACEMIND_SETUP_SECRET` (any long random string). Or run `tracemind serve` anywhere Node runs,
+   with the same two variables.
 2. Create the workspace and its first admin, from your machine:
    `tracemind cloud setup --url https://your-server --secret <setup secret> --workspace acme`.
    Setup works once; after that the secret does nothing.

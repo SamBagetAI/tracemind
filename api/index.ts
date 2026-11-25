@@ -15,5 +15,8 @@ await store.migrate();
 
 const app = createApp({ store, mode: "server", setupSecret: process.env.TRACEMIND_SETUP_SECRET });
 
+// /mcp (streamable HTTP) also uses DELETE, and browsers send OPTIONS before a cross-site POST.
 export const GET = handle(app);
 export const POST = handle(app);
+export const DELETE = handle(app);
+export const OPTIONS = handle(app);
