@@ -1,25 +1,51 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 180" width="240" height="180" role="img" aria-label="Tracemind's mascot: a slug with a big brain, leaving a trace behind it">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 180" width="240" height="180" role="img" aria-label="Tracemind's mascot: a slug with a big brain, crawling and leaving a trace behind it">
   <title>Tracemind slug</title>
-  <!-- the trace it leaves: a session strip, with one failure marked -->
+  <style>
+    /* The slug crawls in place: its body stretches and gathers, its head bobs, its eyes look around
+       and blink, and the trace it leaves slides away behind it, one failure (red) among the steps. */
+    .body { transform-box: fill-box; transform-origin: 0% 100%; animation: crawl 1.6s ease-in-out infinite; }
+    .head { animation: bob 1.6s ease-in-out infinite; }
+    .stalk-l { transform-box: fill-box; transform-origin: 50% 100%; animation: look 3.2s ease-in-out infinite; }
+    .stalk-r { transform-box: fill-box; transform-origin: 50% 100%; animation: look 3.2s ease-in-out infinite reverse; }
+    .trail { animation: slide 1.6s linear infinite; }
+    .fail { animation: drift 4.8s linear infinite; }
+    .blink { transform-box: fill-box; transform-origin: 50% 50%; animation: blink 4.8s infinite; }
+    @keyframes crawl { 0%, 100% { transform: scaleX(1) } 50% { transform: scaleX(1.045) } }
+    @keyframes bob { 0%, 100% { transform: translate(0, 0) } 50% { transform: translate(4px, -2px) } }
+    @keyframes look { 0%, 100% { transform: rotate(-4deg) } 50% { transform: rotate(5deg) } }
+    @keyframes slide { from { stroke-dashoffset: 0 } to { stroke-dashoffset: 18 } }
+    @keyframes drift { from { transform: translateX(0) } to { transform: translateX(-72px) } }
+    @keyframes blink { 0%, 92%, 100% { transform: scaleY(1) } 95% { transform: scaleY(0.1) } }
+    @media (prefers-reduced-motion: reduce) { * { animation: none !important } }
+  </style>
+
+  <!-- the trace it leaves: a session's steps, one of them failed -->
   <path d="M8 160 H150" stroke="#e9e2d3" stroke-width="10" stroke-linecap="round"/>
-  <path d="M22 160 V160 M40 160 V160 M58 160 V160 M96 160 V160 M118 160 V160" stroke="#c9c0ad" stroke-width="10" stroke-linecap="round"/>
-  <path d="M78 160 V160" stroke="#b8322b" stroke-width="10" stroke-linecap="round"/>
-  <!-- body -->
-  <path d="M60 160 C60 132 92 122 132 122 C150 122 160 110 168 96 C176 82 196 80 206 92 C216 104 212 124 200 136 C188 148 178 160 160 160 Z" fill="#f2c979" stroke="#1d1b18" stroke-width="3" stroke-linejoin="round"/>
-  <!-- belly line -->
-  <path d="M72 152 C100 146 140 148 172 150" fill="none" stroke="#d9a94d" stroke-width="3" stroke-linecap="round"/>
-  <!-- big brain on its back, like a shell -->
-  <path d="M84 126 C80 94 102 70 132 72 C160 74 174 98 168 122 C150 128 110 130 84 126 Z" fill="#f6c6c9" stroke="#1d1b18" stroke-width="3" stroke-linejoin="round"/>
-  <path d="M128 74 C124 88 134 96 128 108 C124 116 130 122 128 127" fill="none" stroke="#1d1b18" stroke-width="2.5" stroke-linecap="round"/>
-  <path d="M100 94 C108 96 110 104 104 110 M154 94 C146 96 144 104 150 110 M92 114 C98 112 102 118 100 124 M162 112 C156 112 152 118 156 124 M112 82 C116 88 112 94 108 96 M144 82 C140 88 144 94 148 96" fill="none" stroke="#1d1b18" stroke-width="2" stroke-linecap="round"/>
-  <!-- eye stalks -->
-  <path d="M192 90 C190 72 188 60 184 50 M204 94 C206 76 210 64 214 56" fill="none" stroke="#1d1b18" stroke-width="3" stroke-linecap="round"/>
-  <circle cx="183" cy="46" r="8" fill="#fffdf8" stroke="#1d1b18" stroke-width="2.5"/>
-  <circle cx="215" cy="52" r="8" fill="#fffdf8" stroke="#1d1b18" stroke-width="2.5"/>
-  <circle cx="185" cy="47" r="3.5" fill="#1d1b18"/>
-  <circle cx="217" cy="53" r="3.5" fill="#1d1b18"/>
-  <!-- smile -->
-  <path d="M196 112 C200 116 206 116 209 111" fill="none" stroke="#1d1b18" stroke-width="2.5" stroke-linecap="round"/>
-  <!-- cheek -->
-  <ellipse cx="190" cy="108" rx="5" ry="3" fill="#ef9f8a" opacity=".7"/>
+  <path class="trail" d="M150 160 H8" stroke="#c9c0ad" stroke-width="10" stroke-linecap="round" stroke-dasharray="0 18"/>
+  <circle class="fail" cx="96" cy="160" r="5" fill="#b8322b"/>
+
+  <!-- body, belly and the big brain it carries like a shell -->
+  <g class="body">
+    <path d="M60 160 C60 132 92 122 132 122 C150 122 160 110 168 96 C176 82 196 80 206 92 C216 104 212 124 200 136 C188 148 178 160 160 160 Z" fill="#f2c979" stroke="#1d1b18" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M72 152 C100 146 140 148 172 150" fill="none" stroke="#d9a94d" stroke-width="3" stroke-linecap="round"/>
+    <path d="M84 126 C80 94 102 70 132 72 C160 74 174 98 168 122 C150 128 110 130 84 126 Z" fill="#f6c6c9" stroke="#1d1b18" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M128 74 C124 88 134 96 128 108 C124 116 130 122 128 127" fill="none" stroke="#1d1b18" stroke-width="2.5" stroke-linecap="round"/>
+    <path d="M100 94 C108 96 110 104 104 110 M154 94 C146 96 144 104 150 110 M92 114 C98 112 102 118 100 124 M162 112 C156 112 152 118 156 124 M112 82 C116 88 112 94 108 96 M144 82 C140 88 144 94 148 96" fill="none" stroke="#1d1b18" stroke-width="2" stroke-linecap="round"/>
+  </g>
+
+  <!-- head: eye stalks, smile and cheek -->
+  <g class="head">
+    <g class="stalk-l">
+      <path d="M192 90 C190 72 188 60 184 50" fill="none" stroke="#1d1b18" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="183" cy="46" r="8" fill="#fffdf8" stroke="#1d1b18" stroke-width="2.5"/>
+      <circle class="blink" cx="185" cy="47" r="3.5" fill="#1d1b18"/>
+    </g>
+    <g class="stalk-r">
+      <path d="M204 94 C206 76 210 64 214 56" fill="none" stroke="#1d1b18" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="215" cy="52" r="8" fill="#fffdf8" stroke="#1d1b18" stroke-width="2.5"/>
+      <circle class="blink" cx="217" cy="53" r="3.5" fill="#1d1b18"/>
+    </g>
+    <path d="M196 112 C200 116 206 116 209 111" fill="none" stroke="#1d1b18" stroke-width="2.5" stroke-linecap="round"/>
+    <ellipse cx="190" cy="108" rx="5" ry="3" fill="#ef9f8a" opacity=".7"/>
+  </g>
 </svg>

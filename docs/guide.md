@@ -65,6 +65,7 @@ is at `https://your-server/mcp` (streamable HTTP), with a token from `tracemind 
 | `list_fixes` / `preview_fix` | The suggested fixes and exactly what each would change |
 | `apply_fix` / `undo_fix` | Apply or take out a fix (local only: never offered by a shared server) |
 | `dismiss_fix` / `resolve_issue` | Dismiss or restore a fix; resolve or reopen an issue |
+| `import_routine_runs` / `routine_sync_status` | Import claude.ai routine runs from their run log; see what is already imported |
 
 The tools call the same API as the web UI, so they give the same numbers and go through the same
 checks.
