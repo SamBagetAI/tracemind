@@ -26,17 +26,6 @@ export function HeatStrip({ values, days, className, tone = "fail" }: { values: 
   );
 }
 
-export function CountBar({ value, max, className }: { value: number; max: number; className?: string }) {
-  return (
-    <span className={cn("flex items-center gap-2", className)}>
-      <span className="relative h-1.5 w-[72px] overflow-hidden rounded-full bg-muted">
-        <span className="absolute inset-y-0 left-0 rounded-full bg-fail" style={{ width: `${Math.max(4, (value / Math.max(1, max)) * 100)}%` }} />
-      </span>
-      <span className="text-[12px] text-fail num">{value}</span>
-    </span>
-  );
-}
-
 export function Clean({ label = "clean" }: { label?: string }) {
   return (
     <span className="inline-flex items-center gap-1 text-ok">

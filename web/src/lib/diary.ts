@@ -37,7 +37,7 @@ export function activeLabel(ms: number): string {
 }
 
 /** "Today", "Yesterday", "Mon 23", "Wed 18 Nov" when it is not this month. `day` is a local YYYY-MM-DD. */
-export function dayLabel(day: string, now = new Date(), toDay = localDay): string {
+export function relativeDay(day: string, now = new Date(), toDay = localDay): string {
   const today = toDay(now.toISOString());
   const yesterday = toDay(new Date(now.getTime() - 86400000).toISOString());
   if (day === today) return "Today";

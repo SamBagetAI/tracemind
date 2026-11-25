@@ -9,7 +9,7 @@ import { useState } from "react";
 import { Link } from "react-router";
 import { Failed, Loading } from "@/components/shell";
 import { useApi, type Overview, type Session, type Suggestion } from "@/lib/api";
-import { activeLabel, byDay, dayLabel, dollars, localDay, sentence, tokens, worthALook } from "@/lib/diary";
+import { activeLabel, byDay, relativeDay, dollars, localDay, sentence, tokens, worthALook } from "@/lib/diary";
 import { projectName } from "@/lib/format";
 import { useWindow } from "@/lib/window";
 
@@ -38,7 +38,7 @@ function Entry({ s, showDay }: { s: Session; showDay?: boolean }) {
     <div className="py-1.5">
       <Link to={`/sessions/${s.id}`} className="text-[16px] font-semibold text-foreground underline-offset-4 hover:underline">{s.title}</Link>
       <div className="text-[13px] text-faint">
-        {showDay && <>{dayLabel(localDay(s.endedAt))} · </>}
+        {showDay && <>{relativeDay(localDay(s.endedAt))} · </>}
         {projectName(s.project)} · {activeLabel(s.activeMs)} active
       </div>
       <p className={clean ? "mt-0.5 text-[14px] text-ok" : "mt-0.5 text-[14px] text-foreground/80"}>
@@ -128,7 +128,7 @@ export function DiaryPage() {
             <div>
               {groups.map((g) => (
                 <section key={g.day} className="grid grid-cols-1 gap-1 border-t border-border py-4 sm:grid-cols-[100px_1fr] sm:gap-5">
-                  <h2 className="pt-1.5 text-[13px] font-normal text-faint">{dayLabel(g.day)}</h2>
+                  <h2 className="pt-1.5 text-[13px] font-normal text-faint">{relativeDay(g.day)}</h2>
                   <div>{g.sessions.map((s) => <Entry key={s.id} s={s} />)}</div>
                 </section>
               ))}

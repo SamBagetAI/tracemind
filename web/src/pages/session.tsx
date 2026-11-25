@@ -173,7 +173,7 @@ function IssueLine({ finding, issue, window }: { finding?: Finding; issue?: Issu
   );
 }
 
-function StepRow({ row, t0, open, onToggle, memory, issueWindow, current }: { row: Extract<Row, { type: "step" | "repeat" }>; t0: number; open: boolean; onToggle: () => void; memory: MemoryEvent[]; issueWindow: number | null; current?: boolean }) {
+function StepRow({ row, t0, open, onToggle, memory, issueWindow, current }: { row: Extract<Row, { type: "step" | "repeat" }>; t0: number; open: boolean; onToggle: () => void; memory: Map<number, MemoryEvent[]>; issueWindow: number | null; current?: boolean }) {
   const steps = row.type === "repeat" ? row.steps : [row.step];
   const first = steps[0];
   const last = steps[steps.length - 1];
@@ -196,7 +196,7 @@ function StepRow({ row, t0, open, onToggle, memory, issueWindow, current }: { ro
     <span className="block size-1 rounded-full bg-faint" />
   );
   const expandable = !!(first.input || first.output) && first.kind !== "compact";
-  const stepMemory = memory.filter((m) => m.source !== "instructions" && steps.some((s) => s.seq === m.seq));
+  const stepMemory = steps.flatMap((s) => memory.get(s.seq) ?? []);
 
   return (
     <Collapsible open={open} onOpenChange={onToggle} asChild>
@@ -482,19 +482,25 @@ export function SessionPage() {
     if (t.data && m) setTimeout(() => jump(Number(m[1])), 50);
   }, [t.data, hash, jump]);
 
-  const memory = t.data?.memory ?? [];
+  const memory = useMemo(() => t.data?.memory ?? [], [t.data]);
+  // Skills and memory read or written at each step, found once rather than by every row.
+  const memoryBySeq = useMemo(() => {
+    const by = new Map<number, MemoryEvent[]>();
+    for (const m of memory) if (m.source !== "instructions") by.set(m.seq, [...(by.get(m.seq) ?? []), m]);
+    return by;
+  }, [memory]);
   const issueWindow = t.data?.issueWindow ?? null;
   const renderRow = (r: Row): ReactNode => {
     if (r.type === "fold") {
       const key = -r.steps[0].seq;
       return (
         <FoldRow key={`f${key}`} steps={r.steps} open={open.has(key)} onToggle={() => toggle(key)}>
-          {r.steps.map((s) => <StepRow key={s.seq} row={{ type: "step", step: s }} t0={t0} open={open.has(s.seq)} onToggle={() => toggle(s.seq)} memory={memory} issueWindow={issueWindow} />)}
+          {r.steps.map((s) => <StepRow key={s.seq} row={{ type: "step", step: s }} t0={t0} open={open.has(s.seq)} onToggle={() => toggle(s.seq)} memory={memoryBySeq} issueWindow={issueWindow} />)}
         </FoldRow>
       );
     }
     const seq = r.type === "repeat" ? r.steps[0].seq : r.step.seq;
-    return <StepRow key={seq} row={r} t0={t0} open={open.has(seq)} onToggle={() => toggle(seq)} memory={memory} issueWindow={issueWindow} current={current === seq} />;
+    return <StepRow key={seq} row={r} t0={t0} open={open.has(seq)} onToggle={() => toggle(seq)} memory={memoryBySeq} issueWindow={issueWindow} current={current === seq} />;
   };
 
   return (

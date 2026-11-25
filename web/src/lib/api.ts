@@ -126,16 +126,6 @@ export type Overview = {
   strip: { id: string; title: string; startedAt: string; issues: number }[];
 };
 
-export type IssueDetail = {
-  issue: Issue;
-  /** Sessions that hit it in the chosen window. */
-  windowSessions: number;
-  sessions: (Session & { findingSeq: number })[];
-  history: { day: string; sessions: number }[];
-  /** The full error from the latest session that hit it. */
-  example: string | null;
-};
-
 export type Suggestion = {
   id: string;
   kind: "rule" | "routine" | "connect" | "trim" | "investigate" | "tip";

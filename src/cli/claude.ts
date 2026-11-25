@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
 export const claudeHome = () => process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
-export const projectsDir = () => join(claudeHome(), "projects");
+const projectsDir = () => join(claudeHome(), "projects");
 
 /** The transcript of a session and those of the subagents it started. */
 export function readSessionFiles(transcriptPath: string): { lines: string; subagents: string[] } {

@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   PRIMARY KEY (workspace, id)
 );
 CREATE INDEX IF NOT EXISTS sessions_ended ON sessions (workspace, ended_at);
+CREATE INDEX IF NOT EXISTS sessions_started ON sessions (workspace, started_at);
 
 CREATE TABLE IF NOT EXISTS steps (
   workspace TEXT NOT NULL,

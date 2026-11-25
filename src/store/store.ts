@@ -1,5 +1,7 @@
 /** Reading and writing traces, issues and tokens. All queries are scoped to one workspace. */
 import { createHash, randomBytes } from "node:crypto";
+import { ROUTINE_AGENT } from "../core/parse-routine.ts";
+import { projectName } from "../core/describe.ts";
 import { redact } from "../core/redact.ts";
 import type { Finding, IssueKind, MemoryEvent, Outcome, Session, Step, Trace, Brief } from "../core/types.ts";
 import type { Db, Row } from "./db.ts";
@@ -84,31 +86,27 @@ function toIssue(r: Row): IssueRow {
 /** What a session page needs to know about each issue it hit. */
 export type IssueRef = { status: IssueRow["status"]; num: number; sessions: number };
 
-export function hashToken(token: string): string {
+function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-export type SessionFilter = { outcome?: string; project?: string; person?: string; q?: string; since?: string; kind?: SessionKind; limit?: number; offset?: number };
+type SessionFilter = { outcome?: string; project?: string; person?: string; q?: string; since?: string; kind?: SessionKind; limit?: number; offset?: number };
 
 /** Sessions a person worked in, or runs of a claude.ai routine (src/core/parse-routine.ts). */
 export type SessionKind = "sessions" | "routines";
-export const ROUTINE_AGENT = "claude-code-routine";
+export { ROUTINE_AGENT };
 
 /** An open issue is resolved by Tracemind once this many sessions in its projects ran without it. */
 export const QUIET_SESSIONS = 5;
 /** …and the last of them ended at least this long after it was last seen. */
-export const QUIET_MS = 86_400_000;
+const QUIET_MS = 86_400_000;
 /** Who resolved an issue that stopped happening, as the issue page shows it. */
 export const AUTO_RESOLVER = "Tracemind";
-function kindClause(kind: SessionKind | undefined, prefix = ""): { sql: string; params: unknown[] } {
+/** The SQL that keeps only a person's sessions or only routine runs (nothing for both), and its parameter. */
+export function kindClause(kind: SessionKind | undefined, prefix = ""): { sql: string; params: unknown[] } {
   if (kind === "routines") return { sql: ` AND ${prefix}agent = ?`, params: [ROUTINE_AGENT] };
   if (kind === "sessions") return { sql: ` AND ${prefix}agent <> ?`, params: [ROUTINE_AGENT] };
   return { sql: "", params: [] };
-}
-
-/** A project as a note names it: a routine by its name (which may hold a slash), a folder by its last part. */
-function projectLabel(project: string): string {
-  return project.startsWith("routines/") ? project.slice("routines/".length) : project.split("/").filter(Boolean).pop() ?? project;
 }
 
 export class Store {
@@ -135,7 +133,7 @@ export class Store {
     // (src/core/parse-routine.ts), so the same run imported again replaces itself. One run's end
     // can be the next run's start, so every run moves to a temporary id first, then to its new id;
     // only two rows that end up with the same id (the same run imported twice) are merged.
-    const runs = await this.db.all<Row>("SELECT workspace, id, ended_at, step_count FROM sessions WHERE agent = 'claude-code-routine' ORDER BY step_count DESC");
+    const runs = await this.db.all<Row>("SELECT workspace, id, ended_at, step_count FROM sessions WHERE agent = ? ORDER BY step_count DESC", [ROUTINE_AGENT]);
     const moves = runs
       .map((r) => {
         const m = /^(routine-.+)-\d{17}$/.exec(String(r.id));
@@ -243,36 +241,60 @@ export class Store {
    * has it again after that reopens it (touchIssue). With `project`, only issues seen there.
    */
   async autoResolve(ws: string, project?: string) {
-    const open = await this.db.all<Row>(
-      `SELECT i.key, i.last_seen, i.resolved_at FROM issues i WHERE i.workspace = ? AND i.status = 'open'
-       ${project === undefined ? "" : `AND EXISTS (SELECT 1 FROM findings f JOIN sessions s ON s.workspace = f.workspace AND s.id = f.session_id
-                                                  WHERE f.workspace = i.workspace AND f.key = i.key AND s.project = ?)`}`,
-      project === undefined ? [ws] : [ws, project],
+    // Every open issue with each session it was seen in: its projects, and which sessions had it.
+    const seen = await this.db.all<Row>(
+      `SELECT i.key, i.last_seen, i.resolved_at, f.session_id, s.project FROM issues i
+         JOIN findings f ON f.workspace = i.workspace AND f.key = i.key
+         JOIN sessions s ON s.workspace = f.workspace AND s.id = f.session_id
+        WHERE i.workspace = ? AND i.status = 'open'`,
+      [ws],
     );
-    for (const r of open) {
+    const issues = new Map<string, { after: string; projects: Set<string>; hit: Set<string> }>();
+    for (const r of seen) {
       const key = String(r.key);
-      const reopenedAt = r.resolved_at ? String(r.resolved_at) : "";
-      const after = String(r.last_seen) > reopenedAt ? String(r.last_seen) : reopenedAt;
-      const quiet = await this.db.all<Row>(
-        `SELECT s.project, s.ended_at FROM sessions s
-          WHERE s.workspace = ? AND s.started_at > ?
-            AND s.project IN (SELECT s2.project FROM findings f JOIN sessions s2 ON s2.workspace = f.workspace AND s2.id = f.session_id
-                               WHERE f.workspace = ? AND f.key = ?)
-            AND NOT EXISTS (SELECT 1 FROM findings f WHERE f.workspace = s.workspace AND f.session_id = s.id AND f.key = ?)
-          ORDER BY s.ended_at`,
-        [ws, after, ws, key, key],
-      );
-      // Enough quiet sessions, and a day of them: a burst of quick follow-ups is not "stopped".
-      const settled = quiet.findIndex((q, i) => i + 1 >= QUIET_SESSIONS && Date.parse(String(q.ended_at)) - Date.parse(after) >= QUIET_MS);
-      if (settled < 0) continue;
-      const names = [...new Set(quiet.map((q) => projectLabel(String(q.project))))];
-      const where = names.length === 1 ? `in ${names[0]}` : `in ${names.length} projects`;
-      await this.db.run(
-        "UPDATE issues SET status = 'resolved', resolved_at = ?, resolved_by = ?, note = ?, reopened = 0 WHERE workspace = ? AND key = ? AND status = 'open'",
-        [String(quiet[settled].ended_at), AUTO_RESOLVER, `Not seen in the ${quiet.length} sessions ${where} since it last happened.`, ws, key],
-      );
+      let it = issues.get(key);
+      if (!it) {
+        // Quiet sessions count from when it was last seen, or from when someone last reopened it.
+        const reopenedAt = r.resolved_at ? String(r.resolved_at) : "";
+        const after = String(r.last_seen) > reopenedAt ? String(r.last_seen) : reopenedAt;
+        issues.set(key, (it = { after, projects: new Set(), hit: new Set() }));
+      }
+      it.projects.add(String(r.project));
+      it.hit.add(String(r.session_id));
     }
+    const todo = [...issues].filter(([, it]) => project === undefined || it.projects.has(project));
+    if (todo.length === 0) return;
+    const from = todo.reduce((min, [, it]) => (it.after < min ? it.after : min), todo[0][1].after);
+    const byProject = new Map<string, Row[]>();
+    for (const s of await this.db.all<Row>("SELECT id, project, started_at, ended_at FROM sessions WHERE workspace = ? AND started_at > ? ORDER BY ended_at", [ws, from])) {
+      const list = byProject.get(String(s.project)) ?? [];
+      list.push(s);
+      byProject.set(String(s.project), list);
+    }
+    const resolve: [string, string, string][] = [];
+    for (const [key, it] of todo) {
+      const quiet = [...it.projects]
+        .flatMap((p) => byProject.get(p) ?? [])
+        .filter((s) => String(s.started_at) > it.after && !it.hit.has(String(s.id)))
+        .sort((x, y) => (String(x.ended_at) < String(y.ended_at) ? -1 : 1));
+      // Enough quiet sessions, and a day of them: a burst of quick follow-ups is not "stopped".
+      const settled = quiet.findIndex((q, i) => i + 1 >= QUIET_SESSIONS && Date.parse(String(q.ended_at)) - Date.parse(it.after) >= QUIET_MS);
+      if (settled < 0) continue;
+      const names = [...new Set(quiet.map((q) => projectName(String(q.project))))];
+      const where = names.length === 1 ? `in ${names[0]}` : `in ${names.length} projects`;
+      resolve.push([key, String(quiet[settled].ended_at), `Not seen in the ${quiet.length} sessions ${where} since it last happened.`]);
+    }
+    if (resolve.length === 0) return;
+    await this.db.transaction(async (db) => {
+      for (const [key, at, note] of resolve) {
+        await db.run(
+          "UPDATE issues SET status = 'resolved', resolved_at = ?, resolved_by = ?, note = ?, reopened = 0 WHERE workspace = ? AND key = ? AND status = 'open'",
+          [at, AUTO_RESOLVER, note, ws, key],
+        );
+      }
+    });
   }
+
 
   /** Opens an issue the first time it is seen, and reopens a resolved one that is seen again after it was resolved. */
   /**
@@ -320,8 +342,9 @@ export class Store {
       params.push(f.person);
     }
     if (f.kind) {
-      where.push(f.kind === "routines" ? "agent = ?" : "agent <> ?");
-      params.push(ROUTINE_AGENT);
+      const k = kindClause(f.kind);
+      where.push(k.sql.replace(/^ AND /, ""));
+      params.push(...k.params);
     }
     if (f.since) {
       where.push("started_at >= ?");
@@ -417,12 +440,6 @@ export class Store {
          FROM sessions s WHERE s.workspace = ? AND s.started_at >= ?${ks.sql} ORDER BY s.started_at LIMIT 1000`,
       [ws, since, ...ks.params],
     );
-    const [troubled] = await this.db.all<Row>(
-      `SELECT CAST(COUNT(*) AS INTEGER) AS c FROM sessions s
-        WHERE s.workspace = ? AND s.started_at >= ?${ks.sql}
-          AND EXISTS (SELECT 1 FROM findings f WHERE f.workspace = s.workspace AND f.session_id = s.id)`,
-      [ws, since, ...ks.params],
-    );
     const [open] = await this.db.all<Row>(
       "SELECT CAST(COUNT(*) AS INTEGER) AS open FROM issues WHERE workspace = ? AND status = 'open'",
       [ws],
@@ -440,7 +457,7 @@ export class Store {
       costUsd: Number(totals?.cost_usd ?? 0),
       openIssues: n(open?.open),
       /** Sessions where at least one failure was found. */
-      withIssues: n(troubled?.c),
+      withIssues: days.reduce((sum, d) => sum + n(d.failed), 0),
       days: days.map((d) => ({ day: String(d.day), sessions: n(d.sessions), failed: n(d.failed) })),
       /** One entry per session in the period, oldest first, for a strip of cells. */
       strip: strip.map((r) => ({ id: String(r.id), title: String(r.title), startedAt: String(r.started_at), issues: n(r.issue_count) })),
@@ -463,13 +480,7 @@ export class Store {
          FROM issues i WHERE i.workspace = ? AND i.key = ?`,
       [ws, key],
     );
-    if (rows.length === 0) return null;
-    const sessions = await this.db.all<Row>(
-      `SELECT s.*, f.seq AS finding_seq FROM findings f JOIN sessions s ON s.workspace = f.workspace AND s.id = f.session_id
-        WHERE f.workspace = ? AND f.key = ? ORDER BY s.ended_at DESC LIMIT 100`,
-      [ws, key],
-    );
-    return { issue: toIssue(rows[0]), sessions: sessions.map((r) => ({ ...toSession(r), findingSeq: n(r.finding_seq) })) };
+    return rows.length === 0 ? null : { issue: toIssue(rows[0]) };
   }
 
   async setIssueStatus(ws: string, key: string, status: "open" | "resolved", by: string, note: string) {
@@ -479,8 +490,9 @@ export class Store {
         [now(), by, redact(note).slice(0, 500), ws, key],
       );
     } else {
-      // Reopened by hand: Tracemind counts quiet sessions again from now before it resolves it.
-      await this.db.run("UPDATE issues SET status = 'open', resolved_at = ? WHERE workspace = ? AND key = ?", [now(), ws, key]);
+      // Reopened by hand: Tracemind counts quiet sessions again from now before it resolves it. An
+      // issue that was already open keeps its count.
+      await this.db.run("UPDATE issues SET status = 'open', resolved_at = ? WHERE workspace = ? AND key = ? AND status = 'resolved'", [now(), ws, key]);
     }
   }
 
@@ -490,18 +502,19 @@ export class Store {
    * Typical is the median, slow the 95th percentile, of the calls whose run time is known.
    */
   async tools(ws: string, since: string, kind?: SessionKind) {
-    const inWindow = `SELECT id FROM sessions WHERE workspace = ? AND started_at >= ?${kind === "routines" ? ` AND agent = '${ROUTINE_AGENT}'` : kind === "sessions" ? ` AND agent <> '${ROUTINE_AGENT}'` : ""}`;
+    const k = kindClause(kind);
+    const inWindow = `SELECT id FROM sessions WHERE workspace = ? AND started_at >= ?${k.sql}`;
     const rows = await this.db.all<Row>(
       `SELECT name, CAST(COUNT(*) AS INTEGER) AS calls,
               CAST(SUM(is_error) AS INTEGER) AS errors,
               CAST(COUNT(DISTINCT session_id) AS INTEGER) AS sessions
          FROM steps WHERE workspace = ? AND kind IN ('tool', 'subagent') AND session_id IN (${inWindow})
         GROUP BY name ORDER BY calls DESC`,
-      [ws, ws, since],
+      [ws, ws, since, ...k.params],
     );
     const times = await this.db.all<Row>(
       `SELECT name, duration_ms FROM steps WHERE workspace = ? AND kind IN ('tool', 'subagent') AND session_id IN (${inWindow}) AND duration_ms IS NOT NULL`,
-      [ws, ws, since],
+      [ws, ws, since, ...k.params],
     );
     const byName = new Map<string, number[]>();
     for (const t of times) {

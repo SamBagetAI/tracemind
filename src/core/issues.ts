@@ -170,9 +170,3 @@ export function findIssues(steps: Step[], fingerprints: Map<number, string> = ne
   return out;
 }
 
-export const KIND_LABEL: Record<IssueKind, string> = {
-  tool_error: "Tool error",
-  permission_denied: "Permission refused",
-  step_repetition: "Step repetition",
-  interrupted: "Stopped by a person",
-};

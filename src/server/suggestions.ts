@@ -16,10 +16,11 @@ import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import { hasHook, setHook } from "../cli/claude.ts";
+import { claudeHome, hasHook, setHook } from "../cli/claude.ts";
+import { causeKey, describeIssue } from "../core/describe.ts";
 import type { Row } from "../store/db.ts";
-import { issueGroups, type IssueGroup } from "../store/insights.ts";
-import type { Store } from "../store/store.ts";
+import { causeKeys, issueGroups, type IssueGroup } from "../store/insights.ts";
+import { kindClause, type Store } from "../store/store.ts";
 
 const DAY = 86400000;
 /** Tag on the routine's hook command (a shell comment), so it can be found again whatever the path. */
@@ -53,25 +54,25 @@ export type Suggestion = {
   checks?: BriefChecks | null;
 };
 
-/** SQL for "not a routine run" (src/core/parse-routine.ts names their agent). */
-const LOCAL = "'claude-code-routine'";
+/** "Not a routine run", for SQL on `sessions` (no prefix) or `s`, with its parameter. */
+const LOCAL = kindClause("sessions");
+const LOCAL_S = kindClause("sessions", "s.");
 
-export type BriefChecks = { sessions: number; given: number; empty: number; failed: number; unrecorded: number };
+type BriefChecks = { sessions: number; given: number; empty: number; failed: number; unrecorded: number };
 
 /** Sessions that started since `at`, by what the brief did in them (read from their transcripts). */
-export async function briefChecks(store: Store, ws: string, at: string): Promise<BriefChecks> {
+async function briefChecks(store: Store, ws: string, at: string): Promise<BriefChecks> {
   const rows = await store.db.all<Row>(
     // Routine runs run in the cloud and never run this machine's hooks: they are not missed briefs.
-    `SELECT brief, CAST(COUNT(*) AS INTEGER) AS c FROM sessions WHERE workspace = ? AND started_at >= ? AND agent <> ${LOCAL} GROUP BY brief`,
-    [ws, at],
+    `SELECT brief, CAST(COUNT(*) AS INTEGER) AS c FROM sessions WHERE workspace = ? AND started_at >= ?${LOCAL.sql} GROUP BY brief`,
+    [ws, at, ...LOCAL.params],
   );
   const by = (k: string | null) => Number(rows.find((r) => (r.brief ?? null) === k)?.c ?? 0);
   const given = by("given"), empty = by("empty"), failed = by("failed"), unrecorded = by(null);
   return { sessions: given + empty + failed + unrecorded, given, empty, failed, unrecorded };
 }
 
-const home = () => process.env.TRACEMIND_CLAUDE_HOME_DIR ?? homedir();
-const globalClaudeMd = () => join(process.env.CLAUDE_CONFIG_DIR ?? join(home(), ".claude"), "CLAUDE.md");
+const globalClaudeMd = () => join(claudeHome(), "CLAUDE.md");
 
 /** The repository a session ran in: worktrees count as their main checkout; scratch folders do not count. */
 export function projectRoot(path: string): string | null {
@@ -106,18 +107,18 @@ async function examplesFor(store: Store, ws: string, keys: string[], limit = 3) 
 async function facts(store: Store, ws: string, days: number) {
   const since = new Date(Date.now() - days * DAY).toISOString();
   // Local sessions only: routine runs never read this machine's Claude setup, so a fix to it can't help them.
-  const groups = await issueGroups(store, ws, since, undefined, undefined, true);
-  const sessions = await store.db.all<Row>(`SELECT id, project, title FROM sessions WHERE workspace = ? AND started_at >= ? AND agent <> ${LOCAL}`, [ws, since]);
+  const groups = await issueGroups(store, ws, since, { kind: "sessions" });
+  const sessions = await store.db.all<Row>(`SELECT id, project, title FROM sessions WHERE workspace = ? AND started_at >= ?${LOCAL.sql}`, [ws, since, ...LOCAL.params]);
   const prodReads = await store.db.all<Row>(
     `SELECT s.project, st.session_id, st.seq, st.input, s.title FROM steps st JOIN sessions s ON s.workspace = st.workspace AND s.id = st.session_id
-      WHERE st.workspace = ? AND s.started_at >= ? AND s.agent <> ${LOCAL} AND st.is_error = 1
+      WHERE st.workspace = ? AND s.started_at >= ?${LOCAL_S.sql} AND st.is_error = 1
         AND (st.output LIKE '%[Production Reads]%' OR st.output LIKE '%[Credential Materialization]%' OR st.output LIKE '%[PII Data Handling]%')`,
-    [ws, since],
+    [ws, since, ...LOCAL_S.params],
   );
   const compactions = await store.db.all<Row>(
     `SELECT s.project, COUNT(DISTINCT st.session_id) AS sessions FROM steps st JOIN sessions s ON s.workspace = st.workspace AND s.id = st.session_id
-      WHERE st.workspace = ? AND s.started_at >= ? AND s.agent <> ${LOCAL} AND st.kind = 'compact' GROUP BY s.project`,
-    [ws, since],
+      WHERE st.workspace = ? AND s.started_at >= ?${LOCAL_S.sql} AND st.kind = 'compact' GROUP BY s.project`,
+    [ws, since, ...LOCAL_S.params],
   );
   const [interrupts] = await store.db.all<Row>(
     `SELECT CAST(COUNT(*) AS INTEGER) AS n, CAST(COUNT(DISTINCT s.session_id) AS INTEGER) AS sessions FROM steps s JOIN steps p
@@ -357,16 +358,17 @@ export async function buildSuggestions(store: Store, ws: string, local: boolean,
 
 /** Sessions that hit any of the causes, in the 30 days before `at` and since. */
 export async function effect(store: Store, ws: string, causes: string[], at: string) {
+  // Which issues make up each cause; the counts below already keep to each window.
+  const byCause = causes.length ? await causeKeys(store, ws) : new Map<string, string[]>();
   const window = async (from: string, to: string) => {
-    const [total] = await store.db.all<Row>(`SELECT CAST(COUNT(*) AS INTEGER) AS c FROM sessions WHERE workspace = ? AND started_at >= ? AND started_at < ? AND agent <> ${LOCAL}`, [ws, from, to]);
+    const [total] = await store.db.all<Row>(`SELECT CAST(COUNT(*) AS INTEGER) AS c FROM sessions WHERE workspace = ? AND started_at >= ? AND started_at < ?${LOCAL.sql}`, [ws, from, to, ...LOCAL.params]);
     if (causes.length === 0) return { sessions: Number(total?.c ?? 0), hit: 0 };
-    const groups = await issueGroups(store, ws, from, undefined, undefined, true);
-    const keys = groups.filter((g) => causes.includes(g.id)).flatMap((g) => g.issues.map((i) => i.key));
+    const keys = causes.flatMap((c) => byCause.get(c) ?? []);
     if (keys.length === 0) return { sessions: Number(total?.c ?? 0), hit: 0 };
     const [hit] = await store.db.all<Row>(
       `SELECT CAST(COUNT(DISTINCT f.session_id) AS INTEGER) AS c FROM findings f JOIN sessions s ON s.workspace = f.workspace AND s.id = f.session_id
-        WHERE f.workspace = ? AND s.started_at >= ? AND s.started_at < ? AND s.agent <> ${LOCAL} AND f.key IN (${keys.map(() => "?").join(", ")})`,
-      [ws, from, to, ...keys],
+        WHERE f.workspace = ? AND s.started_at >= ? AND s.started_at < ?${LOCAL_S.sql} AND f.key IN (${keys.map(() => "?").join(", ")})`,
+      [ws, from, to, ...LOCAL_S.params, ...keys],
     );
     return { sessions: Number(total?.c ?? 0), hit: Number(hit?.c ?? 0) };
   };
@@ -482,10 +484,10 @@ export async function sessionContext(store: Store, ws: string, cwd: string): Pro
   const idSet = new Set(ids);
   const rows = await store.db.all<Row>(
     `SELECT f.key, f.session_id, i.kind, i.title FROM findings f JOIN issues i ON i.workspace = f.workspace AND i.key = f.key
-      WHERE f.workspace = ? AND i.kind <> 'interrupted' AND i.status = 'open'`,
-    [ws],
+       JOIN sessions s ON s.workspace = f.workspace AND s.id = f.session_id
+      WHERE f.workspace = ? AND s.started_at >= ? AND i.kind <> 'interrupted' AND i.status = 'open'`,
+    [ws, since],
   );
-  const { causeKey, describeIssue } = await import("../core/describe.ts");
   const byCause = new Map<string, { what: string; sessions: Set<string> }>();
   for (const r of rows) {
     if (!idSet.has(String(r.session_id))) continue;

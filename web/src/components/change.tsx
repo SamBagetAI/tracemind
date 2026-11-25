@@ -87,7 +87,7 @@ export function ChangeBody({ s }: { s: Suggestion }) {
   return <p className="mt-2 text-muted-foreground">{s.why}</p>;
 }
 
-export function ApplyDialog({ s, open, onOpenChange, onApplied }: { s: Suggestion; open: boolean; onOpenChange: (o: boolean) => void; onApplied: () => void }) {
+function ApplyDialog({ s, open, onOpenChange, onApplied }: { s: Suggestion; open: boolean; onOpenChange: (o: boolean) => void; onApplied: () => void }) {
   const p = usePreview(s.id, open);
   const [busy, setBusy] = useState(false);
   const go = async () => {
@@ -148,7 +148,7 @@ export function ApplyDialog({ s, open, onOpenChange, onApplied }: { s: Suggestio
 }
 
 /** Before (30 days before it was applied) and since, for the causes the change was meant to stop. */
-export function Effect({ s }: { s: Suggestion }) {
+function Effect({ s }: { s: Suggestion }) {
   const e = s.effect;
   if (!e || s.causes.length === 0) return null;
   const before = e.before.sessions ? e.before.hit / e.before.sessions : 0;
@@ -169,7 +169,7 @@ export function Effect({ s }: { s: Suggestion }) {
  * Whether the session-start brief is doing its job, from the sessions that started since it was
  * installed: each transcript records whether the hook ran and what it said.
  */
-export function BriefCheck({ s }: { s: Suggestion }) {
+function BriefCheck({ s }: { s: Suggestion }) {
   const c = s.checks;
   if (!c) return null;
   if (c.sessions === 0) return <p className="mt-1 text-[12px] text-muted-foreground">Not checked yet: no session has started since it was installed.</p>;
