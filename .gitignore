@@ -11,3 +11,6 @@ design/
 
 # Test projects (outside /tmp, see test/suggestions.test.ts)
 .test-tmp/
+
+# macOS folder settings
+.DS_Store
