@@ -31,14 +31,21 @@ const FPS = 10;
 async function startDemo() {
   const home = mkdtempSync(join(tmpdir(), "tm-record-"));
   const env = { ...process.env, TRACEMIND_HOME: home };
-  const fill = spawnSync(process.execPath, [join(repo, "scripts/demo.mjs")], { env, stdio: ["ignore", "ignore", "inherit"] });
-  if (fill.status !== 0) throw new Error("scripts/demo.mjs failed; run pnpm build first");
-  const ui = spawn(process.execPath, [join(repo, "dist/src/cli/index.js"), "ui", "--port", String(PORT), "--no-open"], { env, stdio: ["ignore", "pipe", "inherit"] });
-  await new Promise((ready, fail) => {
-    ui.stdout.on("data", (b) => b.toString().includes("running at") && ready());
-    ui.on("exit", (code) => fail(new Error(`tracemind ui exited (${code})`)));
-  });
-  return { stop: () => (ui.kill(), rmSync(home, { recursive: true, force: true })) };
+  let ui = null;
+  const stop = () => (ui?.kill(), rmSync(home, { recursive: true, force: true }));
+  try {
+    const fill = spawnSync(process.execPath, [join(repo, "scripts/demo.mjs")], { env, stdio: ["ignore", "ignore", "inherit"] });
+    if (fill.status !== 0) throw new Error("scripts/demo.mjs failed; run pnpm build first");
+    ui = spawn(process.execPath, [join(repo, "dist/src/cli/index.js"), "ui", "--port", String(PORT), "--no-open"], { env, stdio: ["ignore", "pipe", "inherit"] });
+    await new Promise((ready, fail) => {
+      ui.stdout.on("data", (b) => b.toString().includes("running at") && ready());
+      ui.on("exit", (code) => fail(new Error(`tracemind ui exited (${code}); is port ${PORT} free?`)));
+    });
+  } catch (e) {
+    stop();
+    throw e;
+  }
+  return { stop };
 }
 
 /** A 2× screenshot as W×H RGBA, each pixel the average of four: sharper text than a 1× capture. */
@@ -58,11 +65,13 @@ function halve(png) {
 
 async function recordTour(browser) {
   const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 2 });
+  // Each frame keeps when it was taken: a 2× screenshot can take longer than a frame lasts, and the
+  // GIF should play at the speed the page really moved.
   const frames = [];
   const hold = async (seconds) => {
     for (let i = 0; i < seconds * FPS; i++) {
       const t = Date.now();
-      frames.push(await page.screenshot());
+      frames.push({ png: await page.screenshot(), at: t });
       const left = 1000 / FPS - (Date.now() - t);
       if (left > 0) await page.waitForTimeout(left);
     }
@@ -88,7 +97,9 @@ async function recordTour(browser) {
   await page.close();
 
   // One palette for every frame, taken from the start, middle and end, so colors don't flicker.
-  const pixels = frames.map(halve);
+  const pixels = frames.map((f) => halve(f.png));
+  // A frame lasts until the next was taken (at most three frames' time, so a page load is not a pause); the last, one frame.
+  const delays = frames.map((f, i) => Math.min(frames[i + 1] ? frames[i + 1].at - f.at : 1000 / FPS, 1000 / FPS * 3));
   const sample = new Uint8Array(W * H * 4 * 3);
   [0, pixels.length >> 1, pixels.length - 1].forEach((k, i) => sample.set(pixels[k], i * W * H * 4));
   const palette = quantize(sample, 127);
@@ -98,11 +109,11 @@ async function recordTour(browser) {
   palette.push([255, 0, 255]);
   const gif = GIFEncoder();
   let previous = null;
-  for (const p of pixels) {
+  for (const [i, p] of pixels.entries()) {
     const index = applyPalette(p, palette.slice(0, CLEAR));
     const frame = previous ? index.map((v, i) => (v === previous[i] ? CLEAR : v)) : index;
     // dispose 1 keeps the frame before under this one; the palette is written once, with the first.
-    gif.writeFrame(frame, W, H, { palette: previous ? null : palette, delay: 1000 / FPS, transparent: !!previous, transparentIndex: CLEAR, dispose: 1 });
+    gif.writeFrame(frame, W, H, { palette: previous ? null : palette, delay: delays[i], transparent: !!previous, transparentIndex: CLEAR, dispose: 1 });
     previous = index;
   }
   gif.finish();

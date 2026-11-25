@@ -47,6 +47,7 @@ const post = (app: ReturnType<typeof createApp>, path: string, headers: Record<s
 beforeEach(() => {
   // Not in the system temp folder: on Linux that is /tmp, which Tracemind rightly treats as scratch
   // space rather than a project (projectRoot), so project suggestions would not appear.
+  root = "";
   mkdirSync(join(process.cwd(), ".test-tmp"), { recursive: true });
   root = mkdtempSync(join(process.cwd(), ".test-tmp", "tm-sugg-"));
   claudeDir = join(root, ".claude");
@@ -59,7 +60,9 @@ beforeEach(() => {
   process.env.TRACEMIND_HOME = join(root, ".tracemind");
 });
 
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+afterEach(() => {
+  if (root) rmSync(root, { recursive: true, force: true });
+});
 
 describe("suggestions", () => {
   it("are made from what keeps going wrong, pointing at the right files", async () => {
