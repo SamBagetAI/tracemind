@@ -16,7 +16,7 @@
   <img alt="pnpm" src="https://img.shields.io/badge/pnpm-10.33-f69220?logo=pnpm&logoColor=white">
 </p>
 
-![The Diary: the month in one sentence, then the three sessions worth a look](docs/screenshot-diary.png)
+![Tracemind in use: the Diary, a session with its failed calls, then the fixes to review](docs/tour.gif)
 
 Tracemind reads your Claude Code sessions on your machine. It tells you how the week went, names
 what keeps failing (refused commands, files edited before they were read, builds that break), and
