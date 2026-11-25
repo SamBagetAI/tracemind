@@ -358,5 +358,66 @@ export function createMcpServer(call: ApiCall, opts: { canApply: boolean }): Mcp
     },
   );
 
+  server.registerTool(
+    "routine_sync_status",
+    {
+      title: "Routine runs already imported",
+      description:
+        "For each claude.ai routine session already imported into Tracemind: how many runs and when the newest ended. " +
+        "Use it before import_routine_runs to fetch only newer runs (stop paging a run log once it reaches this time).",
+      inputSchema: {},
+      annotations: { readOnlyHint: true },
+    },
+    async () => {
+      const list: { id: string; title: string; endedAt: string }[] = await call("/sessions?limit=2000");
+      const by = new Map<string, { sessionId: string; runs: number; newestRunEnded: string }>();
+      for (const s of list) {
+        const m = /^routine-(.+)-\d{17}$/.exec(s.id);
+        if (!m) continue;
+        const e = by.get(m[1]) ?? { sessionId: m[1], runs: 0, newestRunEnded: "" };
+        e.runs++;
+        if (s.endedAt > e.newestRunEnded) e.newestRunEnded = s.endedAt;
+        by.set(m[1], e);
+      }
+      return text({ routineSessions: [...by.values()] });
+    },
+  );
+
+  server.registerTool(
+    "import_routine_runs",
+    {
+      title: "Import routine runs",
+      description:
+        "Imports the runs of a claude.ai routine into Tracemind, from its run log (RemoteTrigger get_run_log on the routine's session). " +
+        "Each finished run becomes a session, and its failed or refused calls become issues. Importing the same runs again updates them; nothing is duplicated. " +
+        "Pass the log as `path` when the tool result was saved to a file, otherwise as `log`, unchanged. Several pages of the same session can be passed together.",
+      inputSchema: {
+        routine: z.string().min(1).describe("The routine's name, e.g. \"Campaign replies check-in\"."),
+        session_id: z.string().min(1).describe("The claude.ai session the routine posts into (persistent_session_id, or the run session id)."),
+        log: z.union([z.string(), z.array(z.string())]).optional().describe("The run log text, or several pages of it."),
+        path: z.string().optional().describe("A file holding the run log (local app only)."),
+        fires: z.array(z.object({ name: z.string(), at: z.string() })).optional().describe("Fire times of the routines that post into this session, to name each run after the routine that started it."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+    },
+    async ({ routine, session_id, log, path, fires }) => {
+      let pages: string[] = Array.isArray(log) ? log : log ? [log] : [];
+      if (path) {
+        if (!opts.canApply) throw new Error("Reading a file works in the local app only; pass the log as text.");
+        const { readFileSync, statSync } = await import("node:fs");
+        if (statSync(path).size > 20 * 1024 * 1024) throw new Error("That file is over 20 MB; pass the log in pages.");
+        pages = [...pages, readFileSync(path, "utf8")];
+      }
+      if (pages.length === 0) throw new Error("Pass the run log as `log` or `path`.");
+      const { parseRoutineRuns } = await import("../core/parse-routine.ts");
+      const me = await call("/me");
+      const runs = parseRoutineRuns(pages, { routine, sessionId: session_id, person: me.person, fires });
+      let issues = 0;
+      for (const t of runs) issues += (await call("/ingest", t)).findings ?? 0;
+      const newest = runs.map((r) => r.session.endedAt).sort().pop() ?? null;
+      return text({ imported: runs.length, failedCalls: runs.reduce((n, r) => n + r.session.toolErrors, 0), issuesFound: issues, newestRunEnded: newest });
+    },
+  );
+
   return server;
 }

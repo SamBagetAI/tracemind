@@ -35,7 +35,7 @@ describe("MCP server", () => {
   it("lists the read tools and, on the local app, the tools that apply fixes", async () => {
     const { client } = await localClient();
     const names = (await client.listTools()).tools.map((t) => t.name);
-    expect(names).toEqual(expect.arrayContaining(["overview", "list_issues", "get_issue", "list_sessions", "get_session", "list_tools", "list_fixes", "preview_fix", "apply_fix", "undo_fix", "dismiss_fix", "resolve_issue"]));
+    expect(names).toEqual(expect.arrayContaining(["overview", "list_issues", "get_issue", "list_sessions", "get_session", "list_tools", "list_fixes", "preview_fix", "apply_fix", "undo_fix", "dismiss_fix", "resolve_issue", "import_routine_runs", "routine_sync_status"]));
   });
 
   it("gives the same numbers as the web UI's API", async () => {
@@ -72,6 +72,27 @@ describe("MCP server", () => {
     const r = (await client.callTool({ name: "get_issue", arguments: { issue: "nothing like this", days: 30 } })) as { isError?: boolean; content: { text: string }[] };
     expect(r.isError).toBe(true);
     expect(r.content[0].text).toContain("list_issues");
+  });
+});
+
+describe("routine runs over MCP", () => {
+  it("imports a routine's runs as sessions with their issues, and again without duplicates", async () => {
+    const { app, client } = await localClient();
+    const log = [
+      "[2026-11-24T16:12:50.100000Z] env[info]: Allocating sandbox",
+      "[2026-11-24T16:12:51.200000Z] init: model=claude-opus-5-5 cwd=/home/claude",
+      '[2026-11-24T16:34:09.449099Z] tool_use mcp__remote__delete_trigger: {"trigger_id":"t"}',
+      "[2026-11-24T16:34:12.549402Z] permission_denied mcp__remote__delete_trigger [classifier]: [Destructive or Unwanted Actions]",
+      "[2026-11-24T16:34:12.630760Z] tool_result ERROR: Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Destructive or Unwanted Actions].",
+      "[2026-11-24T16:34:23.698792Z] result: success is_error=false turns=2 duration=30s — done",
+    ].join("\n");
+    const first = await read(client, "import_routine_runs", { routine: "Call notes", session_id: "session_X", log });
+    expect(first).toMatchObject({ imported: 1, failedCalls: 1 });
+    await read(client, "import_routine_runs", { routine: "Call notes", session_id: "session_X", log });
+    const list = await (await app.request("/api/sessions?limit=2000")).json();
+    expect(list.filter((x: { id: string }) => x.id.startsWith("routine-")).length).toBe(1);
+    const status = await read(client, "routine_sync_status");
+    expect(status.routineSessions).toEqual([{ sessionId: "session_X", runs: 1, newestRunEnded: "2026-11-24T16:34:23.698Z" }]);
   });
 });
 

@@ -46,6 +46,13 @@ The server is the same app on Postgres, with workspaces and tokens.
 People sign in to the web UI with their token. On a server, a session is filed under the person
 who owns the token that sent it, whatever the client says.
 
+## Routines
+
+claude.ai routines run in a cloud sandbox, so their transcripts are not on your machine. claude.ai keeps
+a condensed log of each run, which Claude can read for you. Tracemind's MCP tool `import_routine_runs`
+turns each run into a session, with its failed and refused calls as issues. A daily scheduled task
+can do it: ask Claude to "import my routine runs into Tracemind every night".
+
 ## MCP: Tracemind inside Claude
 
 Tracemind is also an MCP server, so you can ask Claude about your own sessions ("what keeps going
