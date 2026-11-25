@@ -28,6 +28,6 @@ Google Chrome. A new social preview is uploaded by hand in Settings → General 
 - Add or change a test for what you changed (`test/`). CI runs typecheck, tests and build on
   Node 22.13 and 24, and must pass.
 - Keep numbers honest: every count the UI shows should match a recount from the raw transcripts.
-- How the UI looks and why is in [DESIGN.md](DESIGN.md); where things live is in the
-  [guide](docs/guide.md#develop).
+- How the UI looks and why is in [design notes](../docs/design.md); where things live is in the
+  [guide](../docs/guide.md#develop).
 - Never commit real session data. Screenshots use `scripts/demo.mjs`, through `pnpm record`.
