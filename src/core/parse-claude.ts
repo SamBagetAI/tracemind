@@ -5,7 +5,7 @@
 import { activeMs, costOf } from "./pricing.ts";
 import type { Brief } from "./types.ts";
 
-/** How the session-start brief opens (src/server/suggestions.ts sessionContext). */
+/** How the session-start brief opens (src/server/brief.ts sessionContext). */
 const BRIEF_OPENING = "Tracemind, from this project's recent Claude Code sessions.";
 import { createHash } from "node:crypto";
 import { clip, redact } from "./redact.ts";

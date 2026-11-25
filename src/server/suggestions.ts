@@ -8,24 +8,23 @@
  *              (signing a connector in, trimming a file, finding out why something keeps failing)
  * - "tip":     a habit, nothing to apply
  *
- * Applying only happens in local mode, on files this module picks (never a path from the
- * request), after a preview, with a backup and an exact undo. Once applied, the page shows how
- * often the problem happened before and since.
+ * Applying (fixes.ts) only happens in local mode, on files this module picks (never a path from
+ * the request), after a preview, with a backup and an exact undo. Once applied, the page shows how
+ * often the problem happened before and since. The session-start brief itself is in brief.ts.
  */
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
-import { claudeHome, hasHook, setHook } from "../cli/claude.ts";
-import { CAUSE, causeKey, describeIssue } from "../core/describe.ts";
+import { claudeHome, hasHook } from "../cli/claude.ts";
+import { CAUSE } from "../core/describe.ts";
 import { daysAgo } from "../core/time.ts";
 import type { Row } from "../store/db.ts";
-import { causeKeys, issueGroups, type IssueGroup } from "../store/insights.ts";
+import { causeKeys, issueGroups } from "../store/insights.ts";
 import { kindClause, type Store } from "../store/store.ts";
 
 /** Tag on the routine's hook command (a shell comment), so it can be found again whatever the path. */
-const CONTEXT_MARKER = "tracemind-context";
-const tagged = (command: string) => `${command} # ${CONTEXT_MARKER}`;
+export const CONTEXT_MARKER = "tracemind-context";
+export const tagged = (command: string) => `${command} # ${CONTEXT_MARKER}`;
 
 export type Action =
   | { type: "rule"; file: string; scope: "global" | "project"; text: string }
@@ -133,7 +132,7 @@ async function facts(store: Store, ws: string, days: number) {
 }
 
 /** Rules that hold everywhere, keyed by the cause they prevent. */
-const GLOBAL_RULES: { what: string; title: string; text: string; min: number }[] = [
+export const GLOBAL_RULES: { what: string; title: string; text: string; min: number }[] = [
   {
     what: CAUSE.sleep,
     title: "Stop agents from waiting with sleep",
@@ -379,65 +378,6 @@ export async function effect(store: Store, ws: string, causes: string[], at: str
   return { before, since };
 }
 
-// ---------------------------------------------------------------- applying
-
-const marker = (id: string) => `<!-- tracemind:${id} -->`;
-const block = (id: string, text: string) => `\n${marker(id)}\n- ${text}\n`;
-
-export type Preview = { file: string; exists: boolean; adds: string; tail: string } | { hook: string; event: string } | { prompt: string };
-
-export function preview(s: Suggestion, command: string): Preview {
-  if (s.action.type === "rule") {
-    const exists = existsSync(s.action.file);
-    const text = exists ? readFileSync(s.action.file, "utf8") : "";
-    return { file: s.action.file, exists, adds: block(s.id, s.action.text).trimStart(), tail: text.split("\n").slice(-6).join("\n") };
-  }
-  if (s.action.type === "routine") return { event: s.action.event, hook: tagged(command) };
-  if (s.action.type === "prompt") return { prompt: s.action.text };
-  return { prompt: "" };
-}
-
-function backupDir(): string {
-  const dir = join(process.env.TRACEMIND_HOME ?? join(homedir(), ".tracemind"), "backups");
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  return dir;
-}
-
-export async function apply(store: Store, ws: string, s: Suggestion, command: string): Promise<string> {
-  if (!s.fixable) throw new Error("This suggestion is not something Tracemind can apply; copy it to Claude instead.");
-  if (s.action.type === "rule") {
-    const file = s.action.file;
-    const before = existsSync(file) ? readFileSync(file, "utf8") : null;
-    if (before?.includes(marker(s.id))) return file; // already there
-    if (before != null) copyFileSync(file, join(backupDir(), `${basename(file)}.${s.id}.${Date.now()}.bak`));
-    const add = block(s.id, s.action.text);
-    writeFileSync(file, (before ?? "").replace(/\n*$/, "\n") + add);
-    await setState(store, ws, s.id, "applied", { file, added: add, fix: copyOf(s) });
-    return file;
-  }
-  if (s.action.type === "routine") {
-    const file = setHook("SessionStart", tagged(command), CONTEXT_MARKER, true);
-    await setState(store, ws, s.id, "applied", { file, fix: copyOf(s) });
-    return file;
-  }
-  throw new Error(`Unknown fix type: ${s.action.type}`);
-}
-
-export async function undo(store: Store, ws: string, s: Suggestion): Promise<void> {
-  if (s.action.type === "rule") {
-    const file = s.action.file;
-    if (existsSync(file)) {
-      const text = readFileSync(file, "utf8");
-      const add = block(s.id, s.action.text);
-      // Takes out exactly what was added, and only that.
-      const next = text.includes(add) ? text.replace(add, "\n") : text.replace(new RegExp(`\\n?${marker(s.id).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\n- [^\\n]*\\n?`), "\n");
-      writeFileSync(file, next.replace(/\n{3,}$/, "\n"));
-    }
-  }
-  if (s.action.type === "routine") setHook("SessionStart", "", CONTEXT_MARKER, false);
-  await setState(store, ws, s.id, "open", {});
-}
-
 const ROUTINE = {
   id: sid("routine", "context"),
   kind: "routine" as const,
@@ -445,7 +385,7 @@ const ROUTINE = {
   action: { type: "routine" as const, event: "SessionStart" as const, command: "" },
 };
 
-type Built = Omit<Suggestion, "status" | "at" | "effect" | "issue" | "fixable">;
+export type Built = Omit<Suggestion, "status" | "at" | "effect" | "issue" | "fixable">;
 
 /** What is kept of a fix when it is applied or dismissed, to list it again later. */
 export function copyOf(s: Built): Built {
@@ -463,51 +403,4 @@ function keptCopy(id: string, detail: string): Built | null {
   const rule = GLOBAL_RULES.find((r) => sid("rule", r.what) === id);
   if (!rule) return null;
   return { id, kind: "rule", title: rule.title, why: `For "${rule.what}".`, sessions: 0, examples: [], causes: [rule.what], action: { type: "rule", file: globalClaudeMd(), scope: "global", text: rule.text } };
-}
-
-export async function setState(store: Store, ws: string, id: string, status: Suggestion["status"], detail: object) {
-  await store.db.run("DELETE FROM suggestions WHERE workspace = ? AND id = ?", [ws, id]);
-  await store.db.run("INSERT INTO suggestions (workspace, id, status, at, detail) VALUES (?, ?, ?, ?, ?)", [ws, id, status, new Date().toISOString(), JSON.stringify(detail)]);
-}
-
-// ---------------------------------------------------------------- the routine itself
-
-/** What to tell an agent about each known cause, for the SessionStart hook. */
-const ADVICE: Record<string, string> = Object.fromEntries(GLOBAL_RULES.map((r) => [r.what, r.text]));
-ADVICE[CAUSE.classifier] = "Expect refusals for production data, shared resources and deploys: ask the person instead of retrying another way.";
-ADVICE[CAUSE.notSignedIn] = "Some connectors here are not signed in: if a call says unauthorized, tell the person instead of retrying.";
-
-/** The text a new session gets: up to five problems from its own project's recent sessions. */
-export async function sessionContext(store: Store, ws: string, cwd: string): Promise<string> {
-  const root = projectRoot(cwd);
-  if (!root) return "";
-  const since = daysAgo(30);
-  const ids = (await store.db.all<Row>("SELECT id, project FROM sessions WHERE workspace = ? AND started_at >= ?", [ws, since]))
-    .filter((r) => projectRoot(String(r.project)) === root)
-    .map((r) => String(r.id));
-  if (ids.length < 3) return "";
-  const idSet = new Set(ids);
-  const rows = await store.db.all<Row>(
-    `SELECT f.key, f.session_id, i.kind, i.title FROM findings f JOIN issues i ON i.workspace = f.workspace AND i.key = f.key
-       JOIN sessions s ON s.workspace = f.workspace AND s.id = f.session_id
-      WHERE f.workspace = ? AND s.started_at >= ? AND i.kind <> 'interrupted' AND i.status = 'open'`,
-    [ws, since],
-  );
-  const byCause = new Map<string, { what: string; sessions: Set<string> }>();
-  for (const r of rows) {
-    if (!idSet.has(String(r.session_id))) continue;
-    const issue = { kind: r.kind as never, title: String(r.title) };
-    const k = causeKey(issue);
-    const e = byCause.get(k) ?? { what: describeIssue(issue).what, sessions: new Set<string>() };
-    e.sessions.add(String(r.session_id));
-    byCause.set(k, e);
-  }
-  // A bare exit code is mostly grep or a test finding nothing: not worth a new session's attention.
-  const top = [...byCause.values()]
-    .filter((e) => e.sessions.size >= 3 && e.what !== CAUSE.exitCode)
-    .sort((a, b) => b.sessions.size - a.sessions.size)
-    .slice(0, 5);
-  if (top.length === 0) return "";
-  const lines = top.map((e) => `- ${e.what} (${e.sessions.size} of the last ${ids.length} sessions here)${ADVICE[e.what] ? `: ${ADVICE[e.what]}` : "."}`);
-  return `Tracemind, from this project's recent Claude Code sessions. ${lines.length === 1 ? "This keeps going wrong here:" : "These keep going wrong here:"}\n${lines.join("\n")}`;
 }

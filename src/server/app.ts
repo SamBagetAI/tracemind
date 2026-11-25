@@ -13,7 +13,9 @@ import { InvalidTrace, validateTrace } from "../core/validate.ts";
 import { daysAgo } from "../core/time.ts";
 import { causeCounts, causeDetail, causeKeys, failureMarks, issueGroupsWithPrevious, sessionIssues } from "../store/insights.ts";
 import type { SessionKind, Store } from "../store/store.ts";
-import { apply, buildSuggestions, copyOf, effect, preview, sessionContext, setState, undo } from "./suggestions.ts";
+import { sessionContext } from "./brief.ts";
+import { apply, preview, setState, undo } from "./fixes.ts";
+import { buildSuggestions, copyOf, effect } from "./suggestions.ts";
 
 export type Viewer = { workspace: string; person: string; role: "admin" | "member"; mode: "local" | "server" };
 
