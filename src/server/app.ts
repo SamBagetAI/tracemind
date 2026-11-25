@@ -189,7 +189,9 @@ export function createApp(opts: AppOptions) {
     // The period of the same length just before, for "1 of 2 the week before". Sums are additive,
     // so it is the longer window minus this one.
     const days = windowDays(c);
-    const [now, both] = await Promise.all([store.overview(v.workspace, from), store.overview(v.workspace, since(Math.min(730, days * 2)))]);
+    const k = c.req.query("kind");
+    const kind = k === "sessions" || k === "routines" ? k : undefined;
+    const [now, both] = await Promise.all([store.overview(v.workspace, from, kind), store.overview(v.workspace, since(Math.min(730, days * 2)), kind)]);
     const previous = {
       sessions: both.sessions - now.sessions,
       withIssues: both.withIssues - now.withIssues,
@@ -206,7 +208,7 @@ export function createApp(opts: AppOptions) {
     const limit = Math.min(2000, Number(q.limit) || 50);
     const offset = Math.max(0, Number(q.offset) || 0);
     const ws = c.get("viewer").workspace;
-    const list = await store.sessions(ws, { outcome: q.outcome, project: q.project, person: q.person, q: q.q, since: q.days ? since(windowDays(c)) : undefined, limit, offset });
+    const list = await store.sessions(ws, { outcome: q.outcome, project: q.project, person: q.person, q: q.q, since: q.days ? since(windowDays(c)) : undefined, kind: q.kind === "sessions" || q.kind === "routines" ? q.kind : undefined, limit, offset });
     const [marks, issues] = await Promise.all([
       q.marks === "1" ? failureMarks(store, ws, list) : null,
       q.issues === "1" ? sessionIssues(store, ws, list.map((s) => s.id)) : null,

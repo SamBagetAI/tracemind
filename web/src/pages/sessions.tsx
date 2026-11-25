@@ -14,7 +14,9 @@ const ALL = "__all";
 export function SessionsPage() {
   const { days } = useWindow();
   const [params] = useSearchParams();
-  const list = useApi<Session[]>(`/sessions?limit=2000&marks=1&days=${days}`);
+  // Your own sessions, or the runs of your claude.ai routines.
+  const [kind, setKind] = useState(params.get("kind") === "routines" ? "routines" : "sessions");
+  const list = useApi<Session[]>(`/sessions?limit=2000&marks=1&days=${days}&kind=${kind}`);
   const me = useApi<Viewer>("/me");
   const [project, setProject] = useState(ALL);
   const [show, setShow] = useState(params.get("show") ?? "all");
@@ -34,8 +36,12 @@ export function SessionsPage() {
   const people = new Set((list.data ?? []).map((s) => s.person));
 
   return (
-    <Page title="Sessions" lead={list.data && <span className="text-[13px] num">{list.data.length.toLocaleString("en-US")} started in the last {days} days</span>}>
+    <Page title={kind === "routines" ? "Routine runs" : "Sessions"} lead={list.data && <span className="text-[13px] num">{list.data.length.toLocaleString("en-US")} {kind === "routines" ? "routine runs" : "sessions"} started in the last {days} days</span>}>
       <div className="mb-3 flex flex-wrap items-center gap-2">
+        <ToggleGroup type="single" value={kind} onValueChange={(v) => v && setKind(v)} variant="outline" size="sm" aria-label="Sessions or routine runs">
+          <ToggleGroupItem value="sessions" className="h-8 px-3">Your sessions</ToggleGroupItem>
+          <ToggleGroupItem value="routines" className="h-8 px-3">Routine runs</ToggleGroupItem>
+        </ToggleGroup>
         <ToggleGroup type="single" value={show} onValueChange={(v) => v && setShow(v)} variant="outline" size="sm" aria-label="Which sessions">
           <ToggleGroupItem value="all" className="h-8 px-3">All</ToggleGroupItem>
           <ToggleGroupItem value="issues" className="h-8 px-3">Hit an issue</ToggleGroupItem>

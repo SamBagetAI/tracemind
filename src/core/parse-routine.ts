@@ -67,6 +67,17 @@ export function parseRoutineRuns(log: string | string[], opts: RoutineOptions): 
   return runs.map((run) => runTrace(run, opts)).filter((t): t is Trace => t !== null);
 }
 
+/** What the person wrote in a follow-up turn, without context the app attached (<artifact-view-context …>). */
+function followUp(input: string): string {
+  // Whole context blocks go; one cut short by the log (no closing tag) takes the rest with it.
+  const text = input
+    .replace(/<([a-z-]+)[^>]*>[\s\S]*?<\/\1>/g, " ")
+    .replace(/<[a-z-]+[\s>][\s\S]*$/, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text && !text.startsWith("<") ? text : "follow-up";
+}
+
 function runTrace(run: Event[], opts: RoutineOptions): Trace | null {
   const result = run[run.length - 1];
   const started = run[0].at;
@@ -114,7 +125,7 @@ function runTrace(run: Event[], opts: RoutineOptions): Trace | null {
     agent: "claude-code-routine",
     person: opts.person,
     project: `routines/${name}`,
-    title: clip(byPerson ? `${name}: ${steps[0].input.split("\n")[0]}` : name, 120),
+    title: clip(byPerson ? `${name}: ${followUp(steps[0].input)}` : name, 120),
     gitBranch: null,
     model,
     agentVersion: null,

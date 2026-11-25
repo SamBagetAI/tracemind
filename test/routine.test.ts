@@ -61,6 +61,16 @@ describe("routine runs", () => {
     expect(first.findings.map((f) => describeIssue(f).what)).toContain("Refused by the auto-mode classifier");
   });
 
+  it("names a follow-up turn by what the person wrote, without page context the app attached", () => {
+    const log = `[2026-11-25T08:00:00.000000Z] user: <artifact-view-context artifact="x">a long page</artifact-view-context> did it work?
+[2026-11-25T08:00:05.000000Z] assistant: Yes.
+[2026-11-25T08:00:06.000000Z] result: success is_error=false turns=1 duration=6s — Yes.
+[2026-11-25T09:00:00.000000Z] user: <artifact-view-context artifact="y">{"context":{"mode":"edit"… [+900 chars]
+[2026-11-25T09:00:05.000000Z] assistant: Done.
+[2026-11-25T09:00:06.000000Z] result: success is_error=false turns=1 duration=6s — Done.`;
+    expect(parseRoutineRuns(log, opts).map((r) => r.session.title)).toEqual(["Campaign replies check-in: did it work?", "Campaign replies check-in: follow-up"]);
+  });
+
   it("gives the same session id when the same log is read again, so importing twice does not duplicate", () => {
     const a = parseRoutineRuns(LOG, opts).map((r) => r.session.id);
     const b = parseRoutineRuns([LOG.split("\n").slice(0, 14).join("\n"), LOG], opts).map((r) => r.session.id);

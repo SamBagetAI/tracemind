@@ -88,7 +88,16 @@ export function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-export type SessionFilter = { outcome?: string; project?: string; person?: string; q?: string; since?: string; limit?: number; offset?: number };
+export type SessionFilter = { outcome?: string; project?: string; person?: string; q?: string; since?: string; kind?: SessionKind; limit?: number; offset?: number };
+
+/** Sessions a person worked in, or runs of a claude.ai routine (src/core/parse-routine.ts). */
+export type SessionKind = "sessions" | "routines";
+export const ROUTINE_AGENT = "claude-code-routine";
+function kindClause(kind: SessionKind | undefined, prefix = ""): { sql: string; params: unknown[] } {
+  if (kind === "routines") return { sql: ` AND ${prefix}agent = ?`, params: [ROUTINE_AGENT] };
+  if (kind === "sessions") return { sql: ` AND ${prefix}agent <> ?`, params: [ROUTINE_AGENT] };
+  return { sql: "", params: [] };
+}
 
 export class Store {
   constructor(readonly db: Db) {}
@@ -218,6 +227,10 @@ export class Store {
       where.push("person = ?");
       params.push(f.person);
     }
+    if (f.kind) {
+      where.push(f.kind === "routines" ? "agent = ?" : "agent <> ?");
+      params.push(ROUTINE_AGENT);
+    }
     if (f.since) {
       where.push("started_at >= ?");
       params.push(f.since);
@@ -279,7 +292,13 @@ export class Store {
     };
   }
 
-  async overview(ws: string, since: string) {
+  /**
+   * Totals for the sessions that started in the window. `kind` keeps only the sessions a person
+   * worked in ("sessions") or only routine runs ("routines"); without it, both.
+   */
+  async overview(ws: string, since: string, kind?: SessionKind) {
+    const k = kindClause(kind);
+    const ks = kindClause(kind, "s.");
     const [totals] = await this.db.all<Row>(
       `SELECT CAST(COUNT(*) AS INTEGER) AS sessions,
               CAST(COALESCE(SUM(CASE WHEN outcome = 'ok' THEN 1 ELSE 0 END), 0) AS INTEGER) AS ok,
@@ -291,26 +310,26 @@ export class Store {
               CAST(COALESCE(SUM(output_tokens), 0) AS BIGINT) AS output_tokens,
               CAST(COALESCE(SUM(active_ms), 0) AS BIGINT) AS active_ms,
               COALESCE(SUM(cost_usd), 0) AS cost_usd
-         FROM sessions WHERE workspace = ? AND started_at >= ?`,
-      [ws, since],
+         FROM sessions WHERE workspace = ? AND started_at >= ?${k.sql}`,
+      [ws, since, ...k.params],
     );
     const days = await this.db.all<Row>(
       `SELECT SUBSTR(s.started_at, 1, 10) AS day, CAST(COUNT(*) AS INTEGER) AS sessions,
               CAST(COALESCE(SUM(CASE WHEN EXISTS (SELECT 1 FROM findings f WHERE f.workspace = s.workspace AND f.session_id = s.id) THEN 1 ELSE 0 END), 0) AS INTEGER) AS failed
-         FROM sessions s WHERE s.workspace = ? AND s.started_at >= ? GROUP BY SUBSTR(s.started_at, 1, 10) ORDER BY day`,
-      [ws, since],
+         FROM sessions s WHERE s.workspace = ? AND s.started_at >= ?${ks.sql} GROUP BY SUBSTR(s.started_at, 1, 10) ORDER BY day`,
+      [ws, since, ...ks.params],
     );
     const strip = await this.db.all<Row>(
       `SELECT s.id, s.title, s.started_at,
               CAST((SELECT COUNT(*) FROM findings f WHERE f.workspace = s.workspace AND f.session_id = s.id) AS INTEGER) AS issue_count
-         FROM sessions s WHERE s.workspace = ? AND s.started_at >= ? ORDER BY s.started_at LIMIT 1000`,
-      [ws, since],
+         FROM sessions s WHERE s.workspace = ? AND s.started_at >= ?${ks.sql} ORDER BY s.started_at LIMIT 1000`,
+      [ws, since, ...ks.params],
     );
     const [troubled] = await this.db.all<Row>(
       `SELECT CAST(COUNT(*) AS INTEGER) AS c FROM sessions s
-        WHERE s.workspace = ? AND s.started_at >= ?
+        WHERE s.workspace = ? AND s.started_at >= ?${ks.sql}
           AND EXISTS (SELECT 1 FROM findings f WHERE f.workspace = s.workspace AND f.session_id = s.id)`,
-      [ws, since],
+      [ws, since, ...ks.params],
     );
     const [open] = await this.db.all<Row>(
       "SELECT CAST(COUNT(*) AS INTEGER) AS open FROM issues WHERE workspace = ? AND status = 'open'",

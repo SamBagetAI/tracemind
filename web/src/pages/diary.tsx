@@ -58,8 +58,10 @@ function Entry({ s, showDay }: { s: Session; showDay?: boolean }) {
 
 export function DiaryPage() {
   const { days } = useWindow();
-  const o = useApi<Overview>(`/overview?days=${days}`);
-  const list = useApi<Session[]>(`/sessions?days=${days}&limit=2000&issues=1`);
+  // Sessions you worked in; routine runs (claude.ai routines) get their own line.
+  const o = useApi<Overview>(`/overview?days=${days}&kind=sessions`);
+  const routines = useApi<Overview>(`/overview?days=${days}&kind=routines`);
+  const list = useApi<Session[]>(`/sessions?days=${days}&limit=2000&issues=1&kind=sessions`);
   const fixes = useApi<Suggestion[]>(`/suggestions?days=${days}`);
   const [shown, setShown] = useState(PAGE);
   const [all, setAll] = useState(false);
@@ -85,6 +87,14 @@ export function DiaryPage() {
       {o.data && list.data && (
         <>
           <Stats o={o.data} days={days} />
+          {routines.data && routines.data.sessions > 0 && (
+            <p className="-mt-2 mb-3 text-[14px] text-muted-foreground">
+              <Link to="/sessions?kind=routines" className="underline-offset-4 hover:text-foreground hover:underline">
+                Your routines ran {routines.data.sessions} {routines.data.sessions === 1 ? "time" : "times"}
+              </Link>
+              {routines.data.toolErrors > 0 ? `, with ${routines.data.toolErrors} failed ${routines.data.toolErrors === 1 ? "call" : "calls"}.` : ", all clean."}
+            </p>
+          )}
           {open + investigate > 0 && (
             <Link to="/fixes" className="mb-8 inline-flex items-center gap-1.5 text-[14px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
               {[open && (open === 1 ? "1 fix to review" : `${open} fixes to review`), investigate && (investigate === 1 ? "1 issue to investigate" : `${investigate} issues to investigate`)].filter(Boolean).join(" · ")}

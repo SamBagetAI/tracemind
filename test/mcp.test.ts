@@ -91,6 +91,11 @@ describe("routine runs over MCP", () => {
     await read(client, "import_routine_runs", { routine: "Call notes", session_id: "session_X", log });
     const list = await (await app.request("/api/sessions?limit=2000")).json();
     expect(list.filter((x: { id: string }) => x.id.startsWith("routine-")).length).toBe(1);
+    // Routine runs are counted apart from the sessions a person worked in.
+    const kinds = async (k: string) => (await (await app.request(`/api/overview?days=3650&kind=${k}`)).json()).sessions;
+    expect([await kinds("sessions"), await kinds("routines")]).toEqual([1, 1]);
+    const runs = await (await app.request("/api/sessions?limit=2000&kind=routines")).json();
+    expect(runs.map((x: { title: string }) => x.title)).toEqual(["Call notes"]);
     const status = await read(client, "routine_sync_status");
     expect(status.routineSessions).toEqual([{ sessionId: "session_X", runs: 1, newestRunEnded: "2026-11-24T16:34:23.698Z" }]);
   });
