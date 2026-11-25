@@ -156,6 +156,9 @@ function collect(lines: Line[], sidechainFile: boolean, memory: MemoryEvent[], s
       if (!meta.lastAt || line.timestamp > meta.lastAt) meta.lastAt = line.timestamp;
     }
     const sidechain = sidechainFile || line.isSidechain === true;
+    // Active time counts every moment the agent or the person did something: prompts, replies, tool
+    // calls and their results, here or in a subagent. A long build or a subagent at work is not idle.
+    if (line.timestamp && (line.type === "user" || line.type === "assistant")) meta.times.push(line.timestamp);
     if (!sidechainFile) {
       if (line.cwd && !meta.project) meta.project = line.cwd;
       if (line.gitBranch) meta.gitBranch = line.gitBranch;
@@ -314,6 +317,7 @@ type Meta = {
   outputTokens: number;
   costUsd: number;
   brief?: Brief;
+  times: string[];
   usageSeen: Set<string>;
   loaded: Map<string, string>;
 };
@@ -331,7 +335,7 @@ function outcomeOf(steps: Step[], running: boolean): Outcome {
 }
 
 export function parseClaudeSession(sessionId: string, transcript: string | string[], opts: ParseOptions): Trace {
-  const meta: Meta = { inputTokens: 0, outputTokens: 0, costUsd: 0, usageSeen: new Set(), loaded: new Map() };
+  const meta: Meta = { inputTokens: 0, outputTokens: 0, costUsd: 0, times: [], usageSeen: new Set(), loaded: new Map() };
   const steps: Draft[] = [];
   const memory: MemoryEvent[] = [];
 
@@ -382,7 +386,7 @@ export function parseClaudeSession(sessionId: string, transcript: string | strin
     toolErrors: tools.filter((s) => s.isError).length,
     inputTokens: meta.inputTokens,
     outputTokens: meta.outputTokens,
-    activeMs: activeMs(ordered.filter((s) => !s.sidechain).map((s) => s.at).sort()),
+    activeMs: activeMs([...meta.times].sort()),
     costUsd: Math.round(meta.costUsd * 10000) / 10000,
     brief: meta.brief ?? null,
   };

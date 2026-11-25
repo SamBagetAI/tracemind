@@ -87,6 +87,24 @@ describe("parseClaudeSession", () => {
     expect(describeIssue({ kind: "tool_error", title: "Bash node failed: typeerror: fetch failed getaddrinfo enotfound x.test" }).what).toBe("Could not reach the host");
   });
 
+  it("counts a long tool run and a subagent at work as active time", () => {
+    const b = { sessionId: "a", cwd: "/w", isSidechain: false };
+    const at = (min: number) => new Date(Date.parse("2026-11-20T10:00:00Z") + min * 60000).toISOString();
+    const main = [
+      { ...b, type: "user", timestamp: at(0), message: { role: "user", content: "build it" } },
+      { ...b, type: "assistant", timestamp: at(1), message: { id: "m1", role: "assistant", content: [{ type: "tool_use", id: "t1", name: "Task", input: { prompt: "do it" } }] } },
+      // The subagent works for 30 minutes; the main transcript is silent meanwhile.
+      { ...b, type: "user", timestamp: at(31), message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "done" }] } },
+      { ...b, type: "assistant", timestamp: at(32), message: { id: "m2", role: "assistant", content: [{ type: "text", text: "Done." }] } },
+    ];
+    const sub = [10, 20, 30].map((m, i) => ({ sessionId: "a", isSidechain: true, type: "assistant", timestamp: at(m), message: { id: `s${i}`, role: "assistant", content: [{ type: "text", text: "working" }] } }));
+    const toLines = (l: object[]) => l.map((x) => JSON.stringify(x)).join("\n");
+    const without = parseClaudeSession("a", toLines(main), { person: "p" });
+    const withSub = parseClaudeSession("a", toLines(main), { person: "p", subagents: [toLines(sub)] });
+    expect(without.session.activeMs).toBe((1 + 15 + 1) * 60000); // the silent half hour is capped
+    expect(withSub.session.activeMs).toBe(32 * 60000); // the subagent's steps fill it
+  });
+
   it("leaves out time spent waiting for a person", () => {
     const b = { sessionId: "w", cwd: "/w", isSidechain: false };
     const lines = [
