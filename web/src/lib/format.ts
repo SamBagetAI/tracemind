@@ -3,7 +3,7 @@
  * thresholds that decide colour, and short paths. Issue wording and grouping come from
  * src/core/describe.ts, which the server uses too.
  */
-export { KIND, causeKey, describeIssue, toolLabel, topTools } from "../../../src/core/describe";
+export { KIND, causeKey, describeIssue, projectName, toolLabel, topTools } from "../../../src/core/describe";
 
 const DAY = 86400000;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -81,15 +81,6 @@ export const rateLevel = (r: number): Level => (r >= 0.1 ? "high" : r > 0 ? "low
 /** Red only past the threshold; below it a number is plain. There is no in-between colour. */
 export const LEVEL_CLASS: Record<Level, string> = { high: "text-fail", low: "text-foreground", none: "text-muted-foreground" };
 
-/** The folder name of a project path, which is what people recognise. Worktrees show as repo · worktree. */
-export function projectName(path: string): string {
-  const parts = path.split("/").filter(Boolean);
-  const wt = parts.indexOf("worktrees");
-  if (wt >= 2 && parts[wt - 1] === ".claude") return `${parts[wt - 2]} · ${parts[parts.length - 1]}`;
-  if (parts.includes("scratch-workspaces")) return "scratch";
-  return parts[parts.length - 1] ?? path;
-}
-
 /**
  * `/Users/me/.claude/projects/-Users-me-harness-hub/memory/MEMORY.md` → `~/…/harness-hub/memory/MEMORY.md`.
  * Claude Code names a project's memory folder after its path with dashes; the project is what
@@ -121,7 +112,6 @@ export function plainText(md: string): string {
     .trim();
 }
 
-export const isNew = (iso: string, now = Date.now()) => now - Date.parse(iso) < 7 * DAY;
 
 /** How a memory or instruction ref reads: a file as its name and folder, a skill or tool as its name. */
 export function memoryLabel(m: { source: string; ref: string }): { name: string; folder: string } {

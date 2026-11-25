@@ -18,7 +18,7 @@ export const dbPath = () => join(home(), "tracemind.db");
 export const logPath = () => join(home(), "hook.log");
 const configPath = () => join(home(), "config.json");
 
-export function defaultPerson(): string {
+function defaultPerson(): string {
   try {
     const name = execFileSync("git", ["config", "--global", "user.name"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
     if (name) return name;

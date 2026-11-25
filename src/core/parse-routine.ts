@@ -17,6 +17,9 @@ import { activeMs } from "./pricing.ts";
 import { clip, redact } from "./redact.ts";
 import type { Outcome, Session, Step, Trace } from "./types.ts";
 
+/** The agent name every routine run is saved under: how the store tells runs from sessions. */
+export const ROUTINE_AGENT = "claude-code-routine";
+
 type Event = { at: string; kind: string; name: string; text: string };
 
 const LINE = /^\[(\d{4}-\d{2}-\d{2}T[\d:.]+Z)\] ([a-z_]+)(?:\[[a-z]+\])?(?: (ERROR))?(?: ([^\s:[]+))?(?: \[[^\]]*\])?: ?(.*)$/;
@@ -149,7 +152,7 @@ function runTrace(run: Event[], opts: RoutineOptions): Trace | null {
   const session: Session = {
     // Keyed by when the run ended: its result line is always there, while a page may cut its start.
     id: `routine-${opts.sessionId}-${result.at.replace(/[^0-9]/g, "").slice(0, 17)}`,
-    agent: "claude-code-routine",
+    agent: ROUTINE_AGENT,
     person: opts.person,
     project: `routines/${name}`,
     title: clip(byPerson ? `${name}: ${followUp(steps[0].input)}` : name, 120),

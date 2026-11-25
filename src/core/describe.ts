@@ -3,7 +3,9 @@
  * sessions per group) and the web UI (which shows them), so both always agree.
  */
 
-export type IssueKind = "tool_error" | "permission_denied" | "step_repetition" | "interrupted";
+import type { IssueKind } from "./types.ts";
+
+export type { IssueKind };
 
 export const KIND: Record<IssueKind, string> = {
   tool_error: "Tool error",
@@ -94,4 +96,17 @@ export function topTools(tools: { tool: string; sessions: number }[], max = 3): 
   const sorted = [...merged.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t);
   const shown = sorted.slice(0, max).join(", ");
   return sorted.length > max ? `${shown} +${sorted.length - max}` : shown;
+}
+
+/**
+ * The name people recognise for a project: a routine by its name (which may hold a slash), a
+ * folder by its last part, a worktree as repo · worktree.
+ */
+export function projectName(path: string): string {
+  if (path.startsWith("routines/")) return path.slice("routines/".length);
+  const parts = path.split("/").filter(Boolean);
+  const wt = parts.indexOf("worktrees");
+  if (wt >= 2 && parts[wt - 1] === ".claude") return `${parts[wt - 2]} · ${parts[parts.length - 1]}`;
+  if (parts.includes("scratch-workspaces")) return "scratch";
+  return parts[parts.length - 1] ?? path;
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { activeMs, costOf } from "../src/core/pricing.ts";
-import { activeLabel, byDay, dayLabel, dollars, sentence, tokens, worthALook } from "../web/src/lib/diary";
+import { activeLabel, byDay, relativeDay, dollars, sentence, tokens, worthALook } from "../web/src/lib/diary";
 
 describe("diary sentences", () => {
   it("says a clean session ran clean", () => {
@@ -27,10 +27,10 @@ describe("diary sentences", () => {
     expect(activeLabel(295 * 60000)).toBe("4 h 55");
     const now = new Date("2026-11-25T12:00:00Z");
     const utc = (iso: string) => iso.slice(0, 10);
-    expect(dayLabel("2026-11-25", now, utc)).toBe("Today");
-    expect(dayLabel("2026-11-24", now, utc)).toBe("Yesterday");
-    expect(dayLabel("2026-11-23", now, utc)).toBe("Mon 23");
-    expect(dayLabel("2026-10-30", now, utc)).toBe("Fri 30 Oct");
+    expect(relativeDay("2026-11-25", now, utc)).toBe("Today");
+    expect(relativeDay("2026-11-24", now, utc)).toBe("Yesterday");
+    expect(relativeDay("2026-11-23", now, utc)).toBe("Mon 23");
+    expect(relativeDay("2026-10-30", now, utc)).toBe("Fri 30 Oct");
     expect(tokens(1_450_830)).toBe("1.5M");
     expect(tokens(21_441)).toBe("21k");
     expect(dollars(152.03)).toBe("$152");

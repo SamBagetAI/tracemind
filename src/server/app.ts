@@ -11,7 +11,7 @@ import { bodyLimit } from "hono/body-limit";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { InvalidTrace, validateTrace } from "../core/validate.ts";
 import { causeCounts, causeDetail, failureMarks, issueGroups, sessionIssues } from "../store/insights.ts";
-import type { Store } from "../store/store.ts";
+import type { SessionKind, Store } from "../store/store.ts";
 import { apply, buildSuggestions, copyOf, effect, preview, sessionContext, setState, undo } from "./suggestions.ts";
 
 export type Viewer = { workspace: string; person: string; role: "admin" | "member"; mode: "local" | "server" };
@@ -79,6 +79,16 @@ function localWrite(c: Context, mode: "local" | "server"): string | null {
 /** The window a request asks for, in days (1–365, 30 by default), and where it starts. */
 const windowDays = (c: Context) => Math.min(365, Math.max(1, Number(c.req.query("days")) || 30));
 const since = (days: number) => new Date(Date.now() - days * DAY).toISOString();
+/** The `kind` a request asks for (a person's sessions or routine runs), or both. */
+const kindOf = (c: Context): SessionKind | undefined => {
+  const k = c.req.query("kind");
+  return k === "sessions" || k === "routines" ? k : undefined;
+};
+/** The issue `status` a request asks for, or both. */
+const statusOf = (c: Context): "open" | "resolved" | undefined => {
+  const s = c.req.query("status");
+  return s === "open" || s === "resolved" ? s : undefined;
+};
 
 export function createApp(opts: AppOptions) {
   const { store, mode } = opts;
@@ -197,8 +207,7 @@ export function createApp(opts: AppOptions) {
     // The period of the same length just before, for "1 of 2 the week before". Sums are additive,
     // so it is the longer window minus this one.
     const days = windowDays(c);
-    const k = c.req.query("kind");
-    const kind = k === "sessions" || k === "routines" ? k : undefined;
+    const kind = kindOf(c);
     const [now, both] = await Promise.all([store.overview(v.workspace, from, kind), store.overview(v.workspace, since(Math.min(730, days * 2)), kind)]);
     const previous = {
       sessions: both.sessions - now.sessions,
@@ -216,7 +225,7 @@ export function createApp(opts: AppOptions) {
     const limit = Math.min(2000, Number(q.limit) || 50);
     const offset = Math.max(0, Number(q.offset) || 0);
     const ws = c.get("viewer").workspace;
-    const list = await store.sessions(ws, { outcome: q.outcome, project: q.project, person: q.person, q: q.q, since: q.days ? since(windowDays(c)) : undefined, kind: q.kind === "sessions" || q.kind === "routines" ? q.kind : undefined, limit, offset });
+    const list = await store.sessions(ws, { outcome: q.outcome, project: q.project, person: q.person, q: q.q, since: q.days ? since(windowDays(c)) : undefined, kind: kindOf(c), limit, offset });
     const [marks, issues] = await Promise.all([
       q.marks === "1" ? failureMarks(store, ws, list) : null,
       q.issues === "1" ? sessionIssues(store, ws, list.map((s) => s.id)) : null,
@@ -235,7 +244,7 @@ export function createApp(opts: AppOptions) {
     // this very session hit.
     const from = since(windowDays(c));
     const inWindow = !!c.req.query("days") && t.session.startedAt >= from;
-    const [counts, fx] = await Promise.all([causeCounts(store, ws, inWindow ? from : "0000"), keys.length ? fixes(ws, windowDays(c)) : new Map<string, { fix: "ready" | "applied"; at: string | null }>()]);
+    const [counts, fx] = await Promise.all([keys.length ? causeCounts(store, ws, inWindow ? from : "0000") : new Map<string, never>(), keys.length ? fixes(ws, windowDays(c)) : new Map<string, { fix: "ready" | "applied"; at: string | null }>()]);
     for (const k of keys) {
       const cc = counts.get(k);
       const f = cc ? fx.get(cc.cause) : undefined;
@@ -249,8 +258,7 @@ export function createApp(opts: AppOptions) {
   api.get("/projects", async (c) => c.json(await store.projects(c.get("viewer").workspace)));
 
   api.get("/issues", async (c) => {
-    const s = c.req.query("status");
-    return c.json(await store.issues(c.get("viewer").workspace, s === "open" || s === "resolved" ? s : undefined));
+    return c.json(await store.issues(c.get("viewer").workspace, statusOf(c)));
   });
 
   /** For each cause: whether a suggested change exists for it, and whether it was applied. */
@@ -272,17 +280,18 @@ export function createApp(opts: AppOptions) {
 
   api.get("/issue-groups", async (c) => {
     const ws = c.get("viewer").workspace;
-    const s = c.req.query("status");
+    const s = statusOf(c);
     const days = windowDays(c);
     const from = since(days);
     const before = new Date(Date.parse(from) - days * DAY).toISOString();
     const [groups, previous, fix] = await Promise.all([
-      issueGroups(store, ws, from, s === "open" || s === "resolved" ? s : undefined),
-      issueGroups(store, ws, before, undefined, from),
+      issueGroups(store, ws, from),
+      issueGroups(store, ws, before, { until: from }),
       fixes(ws, days),
     ]);
     const prev = new Map(previous.map((g) => [g.id, g.sessions]));
-    return c.json(groups.map((g) => ({ ...g, previous: prev.get(g.id) ?? 0, fix: fix.get(g.id)?.fix ?? null, fixAt: fix.get(g.id)?.at ?? null })));
+    const shown = s ? groups.filter((g) => g.status === s) : groups;
+    return c.json(shown.map((g) => ({ ...g, previous: prev.get(g.id) ?? 0, fix: fix.get(g.id)?.fix ?? null, fixAt: fix.get(g.id)?.at ?? null })));
   });
 
   api.get("/cause/:key", async (c) => {
@@ -322,8 +331,7 @@ export function createApp(opts: AppOptions) {
   });
 
   api.get("/tools", async (c) => {
-    const k = c.req.query("kind");
-    return c.json(await store.tools(c.get("viewer").workspace, since(windowDays(c)), k === "sessions" || k === "routines" ? k : undefined));
+    return c.json(await store.tools(c.get("viewer").workspace, since(windowDays(c)), kindOf(c)));
   });
   api.get("/memory", async (c) => c.json(await store.memory(c.get("viewer").workspace, since(windowDays(c)))));
 
