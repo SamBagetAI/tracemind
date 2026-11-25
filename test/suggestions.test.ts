@@ -4,7 +4,6 @@
  * app on localhost.
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { parseClaudeSession } from "../src/core/parse-claude.ts";
@@ -45,7 +44,10 @@ const post = (app: ReturnType<typeof createApp>, path: string, headers: Record<s
   app.request(`http://localhost:4545${path}`, { method: "POST", headers: { "content-type": "application/json", origin: "http://localhost:4545", ...headers }, body: "{}" });
 
 beforeEach(() => {
-  const root = mkdtempSync(join(tmpdir(), "tm-sugg-"));
+  // Not in the system temp folder: on Linux that is /tmp, which Tracemind rightly treats as scratch
+  // space rather than a project (projectRoot), so project suggestions would not appear.
+  mkdirSync(join(process.cwd(), ".test-tmp"), { recursive: true });
+  const root = mkdtempSync(join(process.cwd(), ".test-tmp", "tm-sugg-"));
   claudeDir = join(root, ".claude");
   project = join(root, "shop");
   mkdirSync(claudeDir, { recursive: true });

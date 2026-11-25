@@ -8,3 +8,6 @@ dist
 
 # Design working files: made from the author's own sessions, kept local
 design/
+
+# Test projects (outside /tmp, see test/suggestions.test.ts)
+.test-tmp/
