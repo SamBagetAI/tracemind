@@ -155,6 +155,8 @@ export type Suggestion = {
   effect: { before: { sessions: number; hit: number }; since: { sessions: number; hit: number } } | null;
   /** "issue" when the numbers are for one issue only (on that issue's page). */
   effectScope?: "issue";
+  /** The session-start brief, once installed: what it did in the sessions that started since. */
+  checks?: { sessions: number; given: number; empty: number; failed: number; unrecorded: number } | null;
 };
 
 export type Preview =

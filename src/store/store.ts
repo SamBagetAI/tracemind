@@ -1,7 +1,7 @@
 /** Reading and writing traces, issues and tokens. All queries are scoped to one workspace. */
 import { createHash, randomBytes } from "node:crypto";
 import { redact } from "../core/redact.ts";
-import type { Finding, IssueKind, MemoryEvent, Outcome, Session, Step, Trace } from "../core/types.ts";
+import type { Finding, IssueKind, MemoryEvent, Outcome, Session, Step, Trace, Brief } from "../core/types.ts";
 import type { Db, Row } from "./db.ts";
 import { SCHEMA } from "./schema.ts";
 
@@ -41,6 +41,7 @@ function toSession(r: Row): Session & { receivedAt: string; pushedAt: string | n
     outputTokens: n(r.output_tokens),
     activeMs: n(r.active_ms),
     costUsd: Number(r.cost_usd ?? 0),
+    brief: (r.brief as Brief | null) ?? null,
     receivedAt: String(r.received_at),
     pushedAt: (r.pushed_at as string) ?? null,
     issueCount: n(r.issue_count),
@@ -102,7 +103,7 @@ export class Store {
       // Already there.
     }
     // Active time and estimated cost came later too; `tracemind import` fills them for old sessions.
-    for (const col of ["active_ms BIGINT NOT NULL DEFAULT 0", "cost_usd DOUBLE PRECISION NOT NULL DEFAULT 0"]) {
+    for (const col of ["active_ms BIGINT NOT NULL DEFAULT 0", "cost_usd DOUBLE PRECISION NOT NULL DEFAULT 0", "brief TEXT"]) {
       try {
         await this.db.exec(`ALTER TABLE sessions ADD COLUMN ${col}`);
       } catch {
@@ -151,9 +152,9 @@ export class Store {
         db,
         "sessions",
         ["workspace", "id", "agent", "person", "project", "title", "git_branch", "model", "agent_version", "started_at",
-          "ended_at", "outcome", "step_count", "tool_calls", "tool_errors", "input_tokens", "output_tokens", "active_ms", "cost_usd", "received_at", "pushed_at"],
+          "ended_at", "outcome", "step_count", "tool_calls", "tool_errors", "input_tokens", "output_tokens", "active_ms", "cost_usd", "brief", "received_at", "pushed_at"],
         [[ws, s.id, s.agent, person, redact(s.project), redact(s.title), s.gitBranch, s.model, s.agentVersion, s.startedAt,
-          s.endedAt, s.outcome, s.stepCount, s.toolCalls, s.toolErrors, s.inputTokens, s.outputTokens, s.activeMs ?? 0, s.costUsd ?? 0, now(), prior[0]?.pushed_at ?? null]],
+          s.endedAt, s.outcome, s.stepCount, s.toolCalls, s.toolErrors, s.inputTokens, s.outputTokens, s.activeMs ?? 0, s.costUsd ?? 0, s.brief ?? null, now(), prior[0]?.pushed_at ?? null]],
       );
       await insertMany(
         db,

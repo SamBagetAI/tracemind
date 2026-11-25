@@ -26,7 +26,14 @@ export type Session = {
   activeMs?: number;
   /** What the session would cost at Claude API list prices, in US dollars (src/core/pricing.ts). */
   costUsd?: number;
+  /**
+   * Tracemind's session-start brief in this session: given (it told the session something), empty
+   * (it ran with nothing to say), failed, or null (no record of it running).
+   */
+  brief?: Brief | null;
 };
+
+export type Brief = "given" | "empty" | "failed";
 
 export type StepKind = "prompt" | "reply" | "tool" | "subagent" | "compact" | "interrupt";
 

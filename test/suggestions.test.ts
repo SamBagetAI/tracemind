@@ -102,6 +102,34 @@ describe("suggestions", () => {
     expect(readFileSync(file, "utf8").trimEnd()).toBe(before.trimEnd());
   });
 
+  it("check the session-start brief in the sessions that start after it is installed", async () => {
+    const { store, app } = await setup();
+    const routine = (await (await app.request("/api/suggestions")).json()).find((s: any) => s.kind === "routine");
+    expect((await post(app, `/api/suggestions/${routine.id}/apply`)).status).toBe(200);
+    const before = (await (await app.request("/api/suggestions")).json()).find((s: any) => s.id === routine.id);
+    expect(before.checks).toEqual({ sessions: 0, given: 0, empty: 0, failed: 0, unrecorded: 0 });
+
+    // Three new sessions: the brief told one something, had nothing to say in one, and failed in one.
+    const later = Date.now() + 60_000;
+    const withHook = (id: string, n: number, attachment: object) => {
+      const base = { sessionId: id, cwd: project, isSidechain: false };
+      const t = (s: number) => new Date(later + n * 600_000 + s * 1000).toISOString();
+      const lines = [
+        { ...base, type: "attachment", timestamp: t(0), attachment: { hookEvent: "SessionStart", hookName: "SessionStart:startup", command: '"/x/tracemind-run" context # tracemind-context', ...attachment } },
+        { ...base, type: "user", timestamp: t(1), message: { role: "user", content: "hello" } },
+      ];
+      return parseClaudeSession(id, lines.map((l) => JSON.stringify(l)).join("\n"), { person: "Ada" });
+    };
+    const given = withHook("b1", 0, { type: "hook_success", stdout: JSON.stringify({ hookSpecificOutput: { additionalContext: "Tracemind, from this project's recent Claude Code sessions. This keeps going wrong here:\n- x" } }) });
+    expect(given.session.brief).toBe("given");
+    await store.saveTrace("local", given);
+    await store.saveTrace("local", withHook("b2", 1, { type: "hook_success", stdout: "" }));
+    await store.saveTrace("local", withHook("b3", 2, { type: "hook_non_blocking_error", stderr: "node: not found" }));
+    await post(app, "/api/suggestions/nothing/dismiss"); // any write clears the cached list
+    const after = (await (await app.request("/api/suggestions")).json()).find((s: any) => s.id === routine.id);
+    expect(after.checks).toEqual({ sessions: 3, given: 1, empty: 1, failed: 1, unrecorded: 0 });
+  });
+
   it("keep an applied or dismissed fix listed after its issue stops showing up, so it can still be undone", async () => {
     const { store, app } = await setup();
     const list = await (await app.request("/api/suggestions?days=7")).json();

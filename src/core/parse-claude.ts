@@ -3,6 +3,10 @@
  * The format is not a public contract: unknown lines are skipped, never fatal.
  */
 import { activeMs, costOf } from "./pricing.ts";
+import type { Brief } from "./types.ts";
+
+/** How the session-start brief opens (src/server/suggestions.ts sessionContext). */
+const BRIEF_OPENING = "Tracemind, from this project's recent Claude Code sessions.";
 import { createHash } from "node:crypto";
 import { clip, redact } from "./redact.ts";
 import { findIssues } from "./issues.ts";
@@ -192,6 +196,17 @@ function collect(lines: Line[], sidechainFile: boolean, memory: MemoryEvent[], s
             });
           }
         }
+        // Tracemind's own session-start brief: did the hook run, and did it tell the session anything?
+        if (!sidechainFile && a.hookEvent === "SessionStart") {
+          const text = `${a.command ?? ""}\n${a.stdout ?? ""}\n${typeof a.content === "string" ? a.content : JSON.stringify(a.content ?? "")}`;
+          if (text.includes("tracemind-context") || text.includes(BRIEF_OPENING)) {
+            const said = text.includes(BRIEF_OPENING);
+            const failed = /error|cancel/i.test(String(a.type)) && !said;
+            const next: Brief = said ? "given" : failed ? "failed" : "empty";
+            // "given" wins over the hook's other records for the same run.
+            if (meta.brief !== "given") meta.brief = next;
+          }
+        }
         break;
       }
 
@@ -298,6 +313,7 @@ type Meta = {
   inputTokens: number;
   outputTokens: number;
   costUsd: number;
+  brief?: Brief;
   usageSeen: Set<string>;
   loaded: Map<string, string>;
 };
@@ -368,6 +384,7 @@ export function parseClaudeSession(sessionId: string, transcript: string | strin
     outputTokens: meta.outputTokens,
     activeMs: activeMs(ordered.filter((s) => !s.sidechain).map((s) => s.at).sort()),
     costUsd: Math.round(meta.costUsd * 10000) / 10000,
+    brief: meta.brief ?? null,
   };
 
   return { session: { ...session, project: redact(session.project) }, steps: ordered, memory: sortedMemory, findings: findIssues(ordered, fingerprints) };

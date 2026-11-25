@@ -79,7 +79,9 @@ The Fixes page turns what keeps going wrong into changes to how Claude is used:
 - **A routine:** a SessionStart hook that tells each new session what keeps going wrong in its project.
 - **A prompt to hand to Claude:** for things that need a person, such as signing a connector in or trimming a file that is too big.
 
-Every file change is previewed first, backed up, and can be undone. Once a suggestion is applied, the page shows
+Every file change is previewed first, backed up, and can be undone. Once the session-start brief is
+installed, Tracemind checks it in every session that starts after: the transcript records whether the hook
+ran and what it said, and the Fixes page shows "given to N of M sessions", or says it failed. Once a suggestion is applied, the page shows
 how often the problem happened before and since. Changes are only made from the local app, on localhost.
 
 ## What it finds

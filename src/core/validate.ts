@@ -62,6 +62,7 @@ export function validateTrace(body: unknown): Trace {
     // Older clients do not send these.
     activeMs: s.activeMs == null ? 0 : num(s.activeMs, "session.activeMs"),
     costUsd: s.costUsd == null ? 0 : Math.max(0, Number(s.costUsd) || 0),
+    brief: s.brief === "given" || s.brief === "empty" || s.brief === "failed" ? s.brief : null,
   };
   const steps: Step[] = b.steps.map((x: any, i: number) => ({
     seq: num(x?.seq, `steps[${i}].seq`),

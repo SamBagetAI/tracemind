@@ -49,7 +49,22 @@ export type Suggestion = {
   at: string | null;
   /** After it was applied: sessions that hit the causes, before (30 days) and since. */
   effect: { before: { sessions: number; hit: number }; since: { sessions: number; hit: number } } | null;
+  /** The session-start brief, once installed: what it did in each session that started since. */
+  checks?: BriefChecks | null;
 };
+
+export type BriefChecks = { sessions: number; given: number; empty: number; failed: number; unrecorded: number };
+
+/** Sessions that started since `at`, by what the brief did in them (read from their transcripts). */
+export async function briefChecks(store: Store, ws: string, at: string): Promise<BriefChecks> {
+  const rows = await store.db.all<Row>(
+    "SELECT brief, CAST(COUNT(*) AS INTEGER) AS c FROM sessions WHERE workspace = ? AND started_at >= ? GROUP BY brief",
+    [ws, at],
+  );
+  const by = (k: string | null) => Number(rows.find((r) => (r.brief ?? null) === k)?.c ?? 0);
+  const given = by("given"), empty = by("empty"), failed = by("failed"), unrecorded = by(null);
+  return { sessions: given + empty + failed + unrecorded, given, empty, failed, unrecorded };
+}
 
 const home = () => process.env.TRACEMIND_CLAUDE_HOME_DIR ?? homedir();
 const globalClaudeMd = () => join(process.env.CLAUDE_CONFIG_DIR ?? join(home(), ".claude"), "CLAUDE.md");
@@ -322,7 +337,14 @@ export async function buildSuggestions(store: Store, ws: string, local: boolean,
     const at = st ? String(st.at) : null;
     const g = f.groups.find((x) => x.id === s.causes[0]);
     const issue = g && s.kind !== "routine" ? { key: g.issues[0].key, num: g.issues[0].num, what: g.what, sessions: g.sessions } : null;
-    result.push({ ...s, issue, status, at, effect: status === "applied" && at ? await effect(store, ws, s.causes, at) : null });
+    result.push({
+      ...s,
+      issue,
+      status,
+      at,
+      effect: status === "applied" && at ? await effect(store, ws, s.causes, at) : null,
+      checks: s.kind === "routine" && status === "applied" && at ? await briefChecks(store, ws, at) : null,
+    });
   }
   const order = { open: 0, applied: 1, dismissed: 2 };
   return result.sort((a, b) => order[a.status] - order[b.status] || b.sessions - a.sessions);

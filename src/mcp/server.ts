@@ -43,7 +43,7 @@ function issueRow(g: Group) {
 type Suggestion = {
   id: string; kind: string; title: string; why: string; sessions: number; status: string; causes: string[];
   action: { type: string; file?: string; text?: string; scope?: string }; examples: { id: string; title: string; seq?: number }[];
-  effect?: unknown; at?: string | null;
+  effect?: unknown; at?: string | null; checks?: unknown;
 };
 
 function fixRow(s: Suggestion) {
@@ -61,7 +61,7 @@ function fixRow(s: Suggestion) {
       : a.type === "prompt" ? { type: "a prompt to run", prompt: a.text }
       : { type: s.kind },
     canApply: a.type === "rule" || a.type === "routine",
-    ...(s.status === "applied" ? { appliedAt: s.at, effect: s.effect } : {}),
+    ...(s.status === "applied" ? { appliedAt: s.at, effect: s.effect, ...(s.checks ? { briefSinceInstalled: s.checks } : {}) } : {}),
   };
 }
 

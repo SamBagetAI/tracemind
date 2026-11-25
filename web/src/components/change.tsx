@@ -165,6 +165,25 @@ export function Effect({ s }: { s: Suggestion }) {
   );
 }
 
+/**
+ * Whether the session-start brief is doing its job, from the sessions that started since it was
+ * installed: each transcript records whether the hook ran and what it said.
+ */
+export function BriefCheck({ s }: { s: Suggestion }) {
+  const c = s.checks;
+  if (!c) return null;
+  if (c.sessions === 0) return <p className="mt-1 text-[12px] text-muted-foreground">Not checked yet: no session has started since it was installed.</p>;
+  if (c.failed > 0) return <p className="mt-1 text-[12px] text-fail num">The brief failed in {c.failed} of {plural(c.sessions, "session")} since it was installed.</p>;
+  if (c.unrecorded === c.sessions)
+    return <p className="mt-1 text-[12px] text-warn num">No record of it running in the {plural(c.sessions, "session")} since: Claude Code may not have loaded the hook. Restart Claude Code, or check ~/.claude/settings.json.</p>;
+  const parts = [
+    `Given to ${c.given} of ${plural(c.sessions, "session")} since it was installed`,
+    c.empty && `${c.empty} had nothing to report for their project`,
+    c.unrecorded && `${c.unrecorded} with no record of it running`,
+  ].filter(Boolean);
+  return <p className="mt-1 text-[12px] text-muted-foreground num">{parts.join(" · ")}.</p>;
+}
+
 export function AppliedLine({ s }: { s: Suggestion }) {
   const a = s.action;
   return (
@@ -174,6 +193,7 @@ export function AppliedLine({ s }: { s: Suggestion }) {
         {a.type === "rule" ? <>Added to <span className="font-mono text-[12px]">{shortPath(a.file)}</span></> : "Hook installed"}
         <span className="text-[12px] text-faint">{when(s.at)}</span>
       </p>
+      <BriefCheck s={s} />
       <Effect s={s} />
     </div>
   );
@@ -254,7 +274,10 @@ export function FixLine({ s, issues }: { s: Suggestion; issues?: boolean }) {
           {s.title}
         </p>
         {applied ? (
-          <Effect s={s} />
+          <>
+            <BriefCheck s={s} />
+            <Effect s={s} />
+          </>
         ) : (
           <p className="mt-0.5 text-[12px] text-faint num">
             <FixKind s={s} />
