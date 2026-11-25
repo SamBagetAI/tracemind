@@ -1,0 +1,466 @@
+/** Reading and writing traces, issues and tokens. All queries are scoped to one workspace. */
+import { createHash, randomBytes } from "node:crypto";
+import { redact } from "../core/redact.ts";
+import type { Finding, IssueKind, MemoryEvent, Outcome, Session, Step, Trace } from "../core/types.ts";
+import type { Db, Row } from "./db.ts";
+import { SCHEMA } from "./schema.ts";
+
+const CHUNK = 200;
+
+const n = (v: unknown): number => (v == null ? 0 : Number(v));
+const now = () => new Date().toISOString();
+
+async function insertMany(db: Db, table: string, cols: string[], rows: unknown[][]) {
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const chunk = rows.slice(i, i + CHUNK);
+    const one = `(${cols.map(() => "?").join(", ")})`;
+    await db.run(
+      `INSERT INTO ${table} (${cols.join(", ")}) VALUES ${chunk.map(() => one).join(", ")}`,
+      chunk.flat(),
+    );
+  }
+}
+
+function toSession(r: Row): Session & { receivedAt: string; pushedAt: string | null; issueCount: number } {
+  return {
+    id: String(r.id),
+    agent: String(r.agent),
+    person: String(r.person),
+    project: String(r.project),
+    title: String(r.title),
+    gitBranch: (r.git_branch as string) ?? null,
+    model: (r.model as string) ?? null,
+    agentVersion: (r.agent_version as string) ?? null,
+    startedAt: String(r.started_at),
+    endedAt: String(r.ended_at),
+    outcome: r.outcome as Outcome,
+    stepCount: n(r.step_count),
+    toolCalls: n(r.tool_calls),
+    toolErrors: n(r.tool_errors),
+    inputTokens: n(r.input_tokens),
+    outputTokens: n(r.output_tokens),
+    receivedAt: String(r.received_at),
+    pushedAt: (r.pushed_at as string) ?? null,
+    issueCount: n(r.issue_count),
+  };
+}
+
+export type IssueRow = {
+  key: string;
+  kind: IssueKind;
+  title: string;
+  status: "open" | "resolved";
+  firstSeen: string;
+  lastSeen: string;
+  resolvedAt: string | null;
+  resolvedBy: string | null;
+  note: string | null;
+  reopened: boolean;
+  sessions: number;
+  /** Short number people use for the issue ("issue #12"), unique within a workspace. */
+  num: number;
+};
+
+function toIssue(r: Row): IssueRow {
+  return {
+    key: String(r.key),
+    kind: r.kind as IssueKind,
+    title: String(r.title),
+    status: r.status as IssueRow["status"],
+    firstSeen: String(r.first_seen),
+    lastSeen: String(r.last_seen),
+    resolvedAt: (r.resolved_at as string) ?? null,
+    resolvedBy: (r.resolved_by as string) ?? null,
+    note: (r.note as string) ?? null,
+    reopened: n(r.reopened) === 1,
+    sessions: n(r.sessions),
+    num: n(r.num),
+  };
+}
+
+/** What a session page needs to know about each issue it hit. */
+export type IssueRef = { status: IssueRow["status"]; num: number; sessions: number };
+
+export function hashToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+export type SessionFilter = { outcome?: string; project?: string; person?: string; q?: string; since?: string; limit?: number; offset?: number };
+
+export class Store {
+  constructor(readonly db: Db) {}
+
+  async migrate() {
+    await this.db.exec(SCHEMA);
+    // Issue numbers came after the first release: add the column to older databases and number
+    // the issues they already have, oldest first.
+    try {
+      await this.db.exec("ALTER TABLE issues ADD COLUMN num INTEGER");
+    } catch {
+      // Already there.
+    }
+    // Repair first/last seen from the sessions (older versions kept the first-saved session's date).
+    await this.db.run(
+      `UPDATE issues SET
+         first_seen = COALESCE((SELECT MIN(s.started_at) FROM findings f JOIN sessions s ON s.workspace = f.workspace AND s.id = f.session_id
+                                 WHERE f.workspace = issues.workspace AND f.key = issues.key), first_seen),
+         last_seen = COALESCE((SELECT MAX(s.ended_at) FROM findings f JOIN sessions s ON s.workspace = f.workspace AND s.id = f.session_id
+                                WHERE f.workspace = issues.workspace AND f.key = issues.key), last_seen)`,
+    );
+    const missing = await this.db.all<Row>("SELECT workspace, key FROM issues WHERE num IS NULL ORDER BY workspace, first_seen, key");
+    if (missing.length === 0) return;
+    await this.db.transaction(async (db) => {
+      const next = new Map<string, number>();
+      for (const r of missing) {
+        const ws = String(r.workspace);
+        if (!next.has(ws)) {
+          const [m] = await db.all<Row>("SELECT CAST(COALESCE(MAX(num), 0) AS INTEGER) AS m FROM issues WHERE workspace = ?", [ws]);
+          next.set(ws, n(m?.m));
+        }
+        const num = next.get(ws)! + 1;
+        next.set(ws, num);
+        await db.run("UPDATE issues SET num = ? WHERE workspace = ? AND key = ?", [num, ws, r.key]);
+      }
+    });
+  }
+
+  /** Saves a whole trace, replacing what was there for that session. Text is redacted again here. */
+  async saveTrace(ws: string, trace: Trace, opts: { person?: string } = {}) {
+    const s = trace.session;
+    const person = opts.person ?? s.person;
+    await this.db.transaction(async (db) => {
+      const prior = await db.all<{ pushed_at: string | null }>(
+        "SELECT pushed_at FROM sessions WHERE workspace = ? AND id = ?",
+        [ws, s.id],
+      );
+      for (const t of ["steps", "memory", "findings"]) {
+        await db.run(`DELETE FROM ${t} WHERE workspace = ? AND session_id = ?`, [ws, s.id]);
+      }
+      await db.run("DELETE FROM sessions WHERE workspace = ? AND id = ?", [ws, s.id]);
+      await insertMany(
+        db,
+        "sessions",
+        ["workspace", "id", "agent", "person", "project", "title", "git_branch", "model", "agent_version", "started_at",
+          "ended_at", "outcome", "step_count", "tool_calls", "tool_errors", "input_tokens", "output_tokens", "received_at", "pushed_at"],
+        [[ws, s.id, s.agent, person, redact(s.project), redact(s.title), s.gitBranch, s.model, s.agentVersion, s.startedAt,
+          s.endedAt, s.outcome, s.stepCount, s.toolCalls, s.toolErrors, s.inputTokens, s.outputTokens, now(), prior[0]?.pushed_at ?? null]],
+      );
+      await insertMany(
+        db,
+        "steps",
+        ["workspace", "session_id", "seq", "kind", "name", "input", "output", "is_error", "at", "duration_ms", "sidechain"],
+        trace.steps.map((st) => [ws, s.id, st.seq, st.kind, st.name, redact(st.input), redact(st.output), st.isError ? 1 : 0, st.at, st.durationMs, st.sidechain ? 1 : 0]),
+      );
+      await insertMany(
+        db,
+        "memory",
+        ["workspace", "session_id", "idx", "seq", "source", "op", "ref", "preview", "at"],
+        trace.memory.map((m, i) => [ws, s.id, i, m.seq, m.source, m.op, redact(m.ref), redact(m.preview), m.at]),
+      );
+      await insertMany(
+        db,
+        "findings",
+        ["workspace", "session_id", "key", "kind", "title", "seq"],
+        trace.findings.map((f) => [ws, s.id, f.key, f.kind, redact(f.title), f.seq]),
+      );
+      for (const f of trace.findings) await this.touchIssue(db, ws, f, s.startedAt, s.endedAt);
+    });
+  }
+
+  /** Opens an issue the first time it is seen, and reopens a resolved one that is seen again after it was resolved. */
+  /**
+   * First seen is when the earliest session with the issue started, and last seen when the latest
+   * ended, whatever order sessions are saved in (an import goes by file date, not session date).
+   */
+  private async touchIssue(db: Db, ws: string, f: Finding, startedAt: string, at: string) {
+    const rows = await db.all<Row>("SELECT status, resolved_at, first_seen, last_seen FROM issues WHERE workspace = ? AND key = ?", [ws, f.key]);
+    if (rows.length === 0) {
+      await db.run(
+        `INSERT INTO issues (workspace, key, kind, title, status, first_seen, last_seen, reopened, num)
+         VALUES (?, ?, ?, ?, 'open', ?, ?, 0, (SELECT COALESCE(MAX(num), 0) + 1 FROM issues WHERE workspace = ?))`,
+        [ws, f.key, f.kind, redact(f.title), startedAt, at, ws],
+      );
+      return;
+    }
+    const r = rows[0];
+    const first = String(r.first_seen) < startedAt ? String(r.first_seen) : startedAt;
+    const last = String(r.last_seen) > at ? String(r.last_seen) : at;
+    if (r.status === "resolved" && r.resolved_at && at > String(r.resolved_at)) {
+      await db.run("UPDATE issues SET status = 'open', reopened = 1, first_seen = ?, last_seen = ? WHERE workspace = ? AND key = ?", [first, last, ws, f.key]);
+    } else {
+      await db.run("UPDATE issues SET first_seen = ?, last_seen = ? WHERE workspace = ? AND key = ?", [first, last, ws, f.key]);
+    }
+  }
+
+  async sessions(ws: string, f: SessionFilter = {}) {
+    const where = ["workspace = ?"];
+    const params: unknown[] = [ws];
+    if (f.outcome) {
+      where.push("outcome = ?");
+      params.push(f.outcome);
+    }
+    if (f.project) {
+      where.push("project = ?");
+      params.push(f.project);
+    }
+    if (f.person) {
+      where.push("person = ?");
+      params.push(f.person);
+    }
+    if (f.since) {
+      where.push("started_at >= ?");
+      params.push(f.since);
+    }
+    if (f.q) {
+      where.push("LOWER(title) LIKE ?");
+      params.push(`%${f.q.toLowerCase()}%`);
+    }
+    params.push(f.limit ?? 50, f.offset ?? 0);
+    const rows = await this.db.all(
+      `SELECT s.*, CAST((SELECT COUNT(*) FROM findings f WHERE f.workspace = s.workspace AND f.session_id = s.id) AS INTEGER) AS issue_count
+         FROM sessions s WHERE ${where.join(" AND ")} ORDER BY ended_at DESC LIMIT ? OFFSET ?`,
+      params,
+    );
+    return rows.map(toSession);
+  }
+
+  async trace(ws: string, id: string): Promise<(Trace & { issues: Record<string, IssueRef> }) | null> {
+    const rows = await this.db.all("SELECT * FROM sessions WHERE workspace = ? AND id = ?", [ws, id]);
+    if (rows.length === 0) return null;
+    const steps = await this.db.all("SELECT * FROM steps WHERE workspace = ? AND session_id = ? ORDER BY seq", [ws, id]);
+    const memory = await this.db.all("SELECT * FROM memory WHERE workspace = ? AND session_id = ? ORDER BY idx", [ws, id]);
+    const findings = await this.db.all("SELECT * FROM findings WHERE workspace = ? AND session_id = ? ORDER BY seq", [ws, id]);
+    const status = await this.db.all<Row>(
+      `SELECT i.key, i.status, i.num,
+              CAST((SELECT COUNT(*) FROM findings g WHERE g.workspace = i.workspace AND g.key = i.key) AS INTEGER) AS sessions
+         FROM issues i JOIN findings f ON f.workspace = i.workspace AND f.key = i.key WHERE f.workspace = ? AND f.session_id = ?`,
+      [ws, id],
+    );
+    return {
+      session: toSession(rows[0]),
+      steps: steps.map(
+        (r): Step => ({
+          seq: n(r.seq),
+          kind: r.kind as Step["kind"],
+          name: String(r.name),
+          input: String(r.input),
+          output: String(r.output),
+          isError: n(r.is_error) === 1,
+          at: String(r.at),
+          durationMs: r.duration_ms == null ? null : n(r.duration_ms),
+          sidechain: n(r.sidechain) === 1,
+        }),
+      ),
+      memory: memory.map(
+        (r): MemoryEvent => ({
+          seq: n(r.seq),
+          source: r.source as MemoryEvent["source"],
+          op: r.op as MemoryEvent["op"],
+          ref: String(r.ref),
+          preview: String(r.preview),
+          at: String(r.at),
+        }),
+      ),
+      findings: findings.map((r): Finding => ({ key: String(r.key), kind: r.kind as IssueKind, title: String(r.title), seq: n(r.seq) })),
+      issues: Object.fromEntries(
+        status.map((r) => [String(r.key), { status: r.status as IssueRow["status"], num: n(r.num), sessions: n(r.sessions) }]),
+      ),
+    };
+  }
+
+  async overview(ws: string, since: string) {
+    const [totals] = await this.db.all<Row>(
+      `SELECT CAST(COUNT(*) AS INTEGER) AS sessions,
+              CAST(COALESCE(SUM(CASE WHEN outcome = 'ok' THEN 1 ELSE 0 END), 0) AS INTEGER) AS ok,
+              CAST(COALESCE(SUM(CASE WHEN outcome = 'error' THEN 1 ELSE 0 END), 0) AS INTEGER) AS error,
+              CAST(COALESCE(SUM(CASE WHEN outcome = 'interrupted' THEN 1 ELSE 0 END), 0) AS INTEGER) AS interrupted,
+              CAST(COALESCE(SUM(tool_calls), 0) AS BIGINT) AS tool_calls,
+              CAST(COALESCE(SUM(tool_errors), 0) AS BIGINT) AS tool_errors,
+              CAST(COALESCE(SUM(input_tokens), 0) AS BIGINT) AS input_tokens,
+              CAST(COALESCE(SUM(output_tokens), 0) AS BIGINT) AS output_tokens
+         FROM sessions WHERE workspace = ? AND started_at >= ?`,
+      [ws, since],
+    );
+    const days = await this.db.all<Row>(
+      `SELECT SUBSTR(s.started_at, 1, 10) AS day, CAST(COUNT(*) AS INTEGER) AS sessions,
+              CAST(COALESCE(SUM(CASE WHEN EXISTS (SELECT 1 FROM findings f WHERE f.workspace = s.workspace AND f.session_id = s.id) THEN 1 ELSE 0 END), 0) AS INTEGER) AS failed
+         FROM sessions s WHERE s.workspace = ? AND s.started_at >= ? GROUP BY SUBSTR(s.started_at, 1, 10) ORDER BY day`,
+      [ws, since],
+    );
+    const strip = await this.db.all<Row>(
+      `SELECT s.id, s.title, s.started_at,
+              CAST((SELECT COUNT(*) FROM findings f WHERE f.workspace = s.workspace AND f.session_id = s.id) AS INTEGER) AS issue_count
+         FROM sessions s WHERE s.workspace = ? AND s.started_at >= ? ORDER BY s.started_at LIMIT 1000`,
+      [ws, since],
+    );
+    const [troubled] = await this.db.all<Row>(
+      `SELECT CAST(COUNT(*) AS INTEGER) AS c FROM sessions s
+        WHERE s.workspace = ? AND s.started_at >= ?
+          AND EXISTS (SELECT 1 FROM findings f WHERE f.workspace = s.workspace AND f.session_id = s.id)`,
+      [ws, since],
+    );
+    const [open] = await this.db.all<Row>(
+      "SELECT CAST(COUNT(*) AS INTEGER) AS open FROM issues WHERE workspace = ? AND status = 'open'",
+      [ws],
+    );
+    return {
+      sessions: n(totals?.sessions),
+      ok: n(totals?.ok),
+      error: n(totals?.error),
+      interrupted: n(totals?.interrupted),
+      toolCalls: n(totals?.tool_calls),
+      toolErrors: n(totals?.tool_errors),
+      inputTokens: n(totals?.input_tokens),
+      outputTokens: n(totals?.output_tokens),
+      openIssues: n(open?.open),
+      /** Sessions where at least one failure was found. */
+      withIssues: n(troubled?.c),
+      days: days.map((d) => ({ day: String(d.day), sessions: n(d.sessions), failed: n(d.failed) })),
+      /** One entry per session in the period, oldest first, for a strip of cells. */
+      strip: strip.map((r) => ({ id: String(r.id), title: String(r.title), startedAt: String(r.started_at), issues: n(r.issue_count) })),
+    };
+  }
+
+  async issues(ws: string, status?: "open" | "resolved") {
+    const rows = await this.db.all(
+      `SELECT i.*, CAST((SELECT COUNT(*) FROM findings f WHERE f.workspace = i.workspace AND f.key = i.key) AS INTEGER) AS sessions
+         FROM issues i WHERE i.workspace = ? ${status ? "AND i.status = ?" : ""}
+        ORDER BY i.last_seen DESC`,
+      status ? [ws, status] : [ws],
+    );
+    return rows.map(toIssue).sort((a, b) => (a.status === b.status ? 0 : a.status === "open" ? -1 : 1));
+  }
+
+  async issue(ws: string, key: string) {
+    const rows = await this.db.all(
+      `SELECT i.*, CAST((SELECT COUNT(*) FROM findings f WHERE f.workspace = i.workspace AND f.key = i.key) AS INTEGER) AS sessions
+         FROM issues i WHERE i.workspace = ? AND i.key = ?`,
+      [ws, key],
+    );
+    if (rows.length === 0) return null;
+    const sessions = await this.db.all<Row>(
+      `SELECT s.*, f.seq AS finding_seq FROM findings f JOIN sessions s ON s.workspace = f.workspace AND s.id = f.session_id
+        WHERE f.workspace = ? AND f.key = ? ORDER BY s.ended_at DESC LIMIT 100`,
+      [ws, key],
+    );
+    return { issue: toIssue(rows[0]), sessions: sessions.map((r) => ({ ...toSession(r), findingSeq: n(r.finding_seq) })) };
+  }
+
+  async setIssueStatus(ws: string, key: string, status: "open" | "resolved", by: string, note: string) {
+    if (status === "resolved") {
+      await this.db.run(
+        "UPDATE issues SET status = 'resolved', resolved_at = ?, resolved_by = ?, note = ?, reopened = 0 WHERE workspace = ? AND key = ?",
+        [now(), by, redact(note).slice(0, 500), ws, key],
+      );
+    } else {
+      await this.db.run("UPDATE issues SET status = 'open' WHERE workspace = ? AND key = ?", [ws, key]);
+    }
+  }
+
+  /**
+   * Calls, failures and run times per tool, for the sessions that started in the window: the same
+   * sessions the Overview and the Sessions list count, so the rows add up to their totals.
+   * Typical is the median, slow the 95th percentile, of the calls whose run time is known.
+   */
+  async tools(ws: string, since: string) {
+    const inWindow = "SELECT id FROM sessions WHERE workspace = ? AND started_at >= ?";
+    const rows = await this.db.all<Row>(
+      `SELECT name, CAST(COUNT(*) AS INTEGER) AS calls,
+              CAST(SUM(is_error) AS INTEGER) AS errors,
+              CAST(COUNT(DISTINCT session_id) AS INTEGER) AS sessions
+         FROM steps WHERE workspace = ? AND kind IN ('tool', 'subagent') AND session_id IN (${inWindow})
+        GROUP BY name ORDER BY calls DESC`,
+      [ws, ws, since],
+    );
+    const times = await this.db.all<Row>(
+      `SELECT name, duration_ms FROM steps WHERE workspace = ? AND kind IN ('tool', 'subagent') AND session_id IN (${inWindow}) AND duration_ms IS NOT NULL`,
+      [ws, ws, since],
+    );
+    const byName = new Map<string, number[]>();
+    for (const t of times) {
+      const k = String(t.name);
+      if (!byName.has(k)) byName.set(k, []);
+      byName.get(k)!.push(n(t.duration_ms));
+    }
+    for (const list of byName.values()) list.sort((a, b) => a - b);
+    const pct = (sorted: number[] | undefined, p: number) =>
+      sorted && sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))] : null;
+    return rows.map((r) => {
+      const list = byName.get(String(r.name));
+      return {
+        name: String(r.name),
+        calls: n(r.calls),
+        errors: n(r.errors),
+        typicalMs: pct(list, 0.5),
+        slowMs: list && list.length >= 5 ? pct(list, 0.95) : null,
+        timed: list?.length ?? 0,
+        sessions: n(r.sessions),
+      };
+    });
+  }
+
+  /** Each piece of memory: how often it was read and written, and how often it was read in a session that went wrong. */
+  async memory(ws: string, since: string) {
+    const rows = await this.db.all<Row>(
+      `SELECT m.ref, m.source,
+              CAST(SUM(CASE WHEN m.op = 'read' THEN 1 ELSE 0 END) AS INTEGER) AS reads,
+              CAST(SUM(CASE WHEN m.op = 'write' THEN 1 ELSE 0 END) AS INTEGER) AS writes,
+              CAST(COUNT(DISTINCT m.session_id) AS INTEGER) AS sessions,
+              MAX(m.at) AS last_at,
+              MAX(CASE WHEN m.op = 'write' THEN m.at END) AS last_write
+         FROM memory m JOIN sessions s ON s.workspace = m.workspace AND s.id = m.session_id
+        WHERE m.workspace = ? AND s.started_at >= ?
+        GROUP BY m.ref, m.source ORDER BY sessions DESC, last_at DESC LIMIT 300`,
+      [ws, since],
+    );
+    return rows.map((r) => ({
+      ref: String(r.ref),
+      source: String(r.source),
+      reads: n(r.reads),
+      writes: n(r.writes),
+      sessions: n(r.sessions),
+      lastAt: String(r.last_at),
+      lastWrite: (r.last_write as string) ?? null,
+    }));
+  }
+
+  async projects(ws: string): Promise<string[]> {
+    const rows = await this.db.all<Row>("SELECT DISTINCT project FROM sessions WHERE workspace = ? ORDER BY project", [ws]);
+    return rows.map((r) => String(r.project));
+  }
+
+  /** Sessions saved or changed since they were last pushed to a server. */
+  async unpushed(ws: string, limit = 500): Promise<string[]> {
+    const rows = await this.db.all<Row>(
+      "SELECT id FROM sessions WHERE workspace = ? AND (pushed_at IS NULL OR pushed_at < received_at) AND outcome <> 'running' ORDER BY ended_at LIMIT ?",
+      [ws, limit],
+    );
+    return rows.map((r) => String(r.id));
+  }
+
+  async markPushed(ws: string, id: string) {
+    await this.db.run("UPDATE sessions SET pushed_at = ? WHERE workspace = ? AND id = ?", [now(), ws, id]);
+  }
+
+  async createToken(ws: string, person: string, role: "admin" | "member"): Promise<string> {
+    const token = `tm_${randomBytes(24).toString("base64url")}`;
+    await this.db.run("INSERT INTO tokens (hash, workspace, person, role, created_at) VALUES (?, ?, ?, ?, ?)", [
+      hashToken(token), ws, person, role, now(),
+    ]);
+    return token;
+  }
+
+  async tokenOwner(token: string): Promise<{ workspace: string; person: string; role: "admin" | "member" } | null> {
+    if (!token.startsWith("tm_")) return null;
+    const hash = hashToken(token);
+    const rows = await this.db.all<Row>("SELECT workspace, person, role FROM tokens WHERE hash = ?", [hash]);
+    if (rows.length === 0) return null;
+    await this.db.run("UPDATE tokens SET last_used_at = ? WHERE hash = ?", [now(), hash]);
+    return { workspace: String(rows[0].workspace), person: String(rows[0].person), role: rows[0].role as "admin" | "member" };
+  }
+
+  async tokenCount(): Promise<number> {
+    const [r] = await this.db.all<Row>("SELECT CAST(COUNT(*) AS INTEGER) AS c FROM tokens");
+    return n(r?.c);
+  }
+}
