@@ -41,9 +41,35 @@ The server is the same app on Postgres, with workspaces and tokens.
 People sign in to the web UI with their token. On a server, a session is filed under the person
 who owns the token that sent it, whatever the client says.
 
-## Suggestions
+## MCP: Tracemind inside Claude
 
-The Suggestions page turns what keeps going wrong into changes to how Claude is used:
+Tracemind is also an MCP server, so you can ask Claude about your own sessions ("what keeps going
+wrong in this repo?", "why did yesterday's session fail?") and have it apply a fix you agreed to.
+
+```bash
+tracemind setup mcp      # registers it with Claude Code for every project (claude mcp add, user scope)
+```
+
+For another MCP client, the server is the command `tracemind mcp` over stdio. On a shared server it
+is at `https://your-server/mcp` (streamable HTTP), with a token from `tracemind cloud token` as
+`Authorization: Bearer <token>`.
+
+| Tool | What it gives |
+|---|---|
+| `overview` | Sessions in the window, clean vs hit an issue, tool calls and failures, top issues, fixes to review |
+| `list_issues` / `get_issue` | Issues by sessions affected, with the trend; one issue's latest error, messages, sessions and fix |
+| `list_sessions` / `get_session` | Sessions by title, project or issues; one session's failures with full input and error |
+| `list_tools` | Calls, failures, failure rate and run times per tool |
+| `list_fixes` / `preview_fix` | The suggested fixes and exactly what each would change |
+| `apply_fix` / `undo_fix` | Apply or take out a fix (local only: never offered by a shared server) |
+| `dismiss_fix` / `resolve_issue` | Dismiss or restore a fix; resolve or reopen an issue |
+
+The tools call the same API as the web UI, so they give the same numbers and go through the same
+checks.
+
+## Fixes
+
+The Fixes page turns what keeps going wrong into changes to how Claude is used:
 - **A rule:** added to your global `~/.claude/CLAUDE.md` or to a project's CLAUDE.md or AGENTS.md.
 - **A routine:** a SessionStart hook that tells each new session what keeps going wrong in its project.
 - **A prompt to hand to Claude:** for things that need a person, such as signing a connector in or trimming a file that is too big.
@@ -73,7 +99,7 @@ are cut, then steps from the middle are left out with a marker; failures and mem
 
 ```bash
 pnpm install
-pnpm test        # parser, redaction, issues, both databases, the API, the trace view and the hooks
+pnpm test        # parser, redaction, issues, both databases, the API, MCP, the trace view and the hooks
 pnpm build       # the server into dist/src, the web UI into dist/web
 pnpm dev:web     # the UI with hot reload on :5173, using the API of `tracemind ui` on :4545
 ```
@@ -81,8 +107,7 @@ pnpm dev:web     # the UI with hot reload on :5173, using the API of `tracemind 
 `src/core` reads transcripts and finds issues, `src/store` is SQLite and Postgres behind one
 interface, `src/server` is the Hono API that also serves the UI, `src/cli` is the command, `api/` is
 the Vercel entry. `web/` is the UI: React, [shadcn/ui](https://ui.shadcn.com) components in
-`web/src/components/ui`, and two [Magic UI](https://magicui.design) pieces (blur-fade, number
-ticker). How it looks and why is in [DESIGN.md](DESIGN.md).
+`web/src/components/ui`. `src/mcp` is the MCP server. How the UI looks and why is in [DESIGN.md](DESIGN.md).
 
 The Claude Code transcript format is not a public contract. Unknown lines are skipped, so a
 change there loses detail rather than breaking the import.

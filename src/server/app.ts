@@ -293,9 +293,16 @@ export function createApp(opts: AppOptions) {
 
   api.get("/suggestions", async (c) => c.json(await suggestionsFor(c.get("viewer").workspace, windowDays(c))));
 
-  // A suggestion's id does not depend on the window; the widest window finds it whatever the page showed.
-  const findSuggestion = async (c: Context<Env>) =>
-    (await suggestionsFor(c.get("viewer").workspace, 365)).find((s) => s.id === c.req.param("id")) ?? null;
+  // A suggestion's id does not depend on the window, but which suggestions exist does: a fix for an
+  // issue that is frequent this month may not make the year's list. So every window the UI offers is
+  // searched, the widest first.
+  const findSuggestion = async (c: Context<Env>) => {
+    for (const days of [365, 90, 30, 7]) {
+      const s = (await suggestionsFor(c.get("viewer").workspace, days)).find((x) => x.id === c.req.param("id"));
+      if (s) return s;
+    }
+    return null;
+  };
 
   api.post("/suggestions/:id/preview", async (c) => {
     const s = await findSuggestion(c);
@@ -346,6 +353,20 @@ export function createApp(opts: AppOptions) {
 
   api.all("*", (c) => c.json({ error: "not found" }, 404));
   app.route("/api", api);
+
+  // ---- MCP: the same API for agents, over HTTP on a shared server (a laptop uses `tracemind mcp`) ----
+  // Stateless: each request gets its own server, which calls the API with the caller's own token.
+  app.all("/mcp", async (c) => {
+    if (mode === "server" && !bearer(c)) return c.json({ error: "a valid token is required (Authorization: Bearer …)" }, 401);
+    const auth: Record<string, string> = bearer(c) ? { authorization: `Bearer ${bearer(c)}` } : {};
+    const { createMcpServer } = await import("../mcp/server.ts");
+    const { apiCaller } = await import("../mcp/call.ts");
+    const { WebStandardStreamableHTTPServerTransport } = await import("@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js");
+    const server = createMcpServer(apiCaller(app, auth), { canApply: false });
+    const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+    await server.connect(transport);
+    return transport.handleRequest(c.req.raw);
+  });
 
   // ---- the web UI ----
   if (opts.webRoot) {

@@ -1,6 +1,6 @@
 #!/usr/bin/env -S node --disable-warning=ExperimentalWarning
 /** The `tracemind` command. */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,6 +25,8 @@ Local
   tracemind ui [--port 4545] [--no-open]    Open the web UI on this machine
   tracemind status                          What is recorded and where
   tracemind context                         (run by a hook) Tell a new session what keeps going wrong in its project
+  tracemind setup mcp                       Give Claude Code Tracemind's MCP tools (issues, sessions, fixes)
+  tracemind mcp                             (run by Claude Code) The MCP server, over stdio
 
 Shared server
   tracemind cloud setup --url URL --secret S --workspace NAME   Create the first admin token on a new server
@@ -213,7 +215,23 @@ async function main(argv: string[]) {
 
     case "setup":
     case "uninstall": {
-      if (sub !== "claude-code") throw new Error(`Only claude-code is supported for now: tracemind ${cmd} claude-code`);
+      if (sub === "mcp") {
+        // Registered with Claude Code's own command, for every project (user scope). It runs through
+        // the same launcher as the hooks, so a Node upgrade does not break it either.
+        selfCommand("mcp", true);
+        const launcher = join(home(), "bin", "tracemind-run");
+        const args = cmd === "setup" ? ["mcp", "add", "tracemind", "--scope", "user", "--", launcher, "mcp"] : ["mcp", "remove", "tracemind", "--scope", "user"];
+        const r = spawnSync("claude", args, { stdio: "inherit" });
+        if (r.error) {
+          console.log(`The claude command was not found. Add this MCP server to your client by hand:
+  { "mcpServers": { "tracemind": { "command": ${JSON.stringify(launcher)}, "args": ["mcp"] } } }`);
+          return;
+        }
+        if (r.status === 0 && cmd === "setup") console.log("Claude Code can now use Tracemind's tools (issues, sessions, fixes) in every project. Start a new session to load them.");
+        process.exitCode = r.status ?? 1;
+        return;
+      }
+      if (sub !== "claude-code") throw new Error(`Supported: tracemind ${cmd} claude-code, tracemind ${cmd} mcp`);
       const { values } = parseArgs({ args: rest, options: { project: { type: "boolean" } } });
       const scope = values.project ? "project" : "user";
       if (cmd === "uninstall") {
@@ -275,6 +293,18 @@ Next:
 Stop that one (Ctrl+C in its terminal), or use another port: tracemind ui --port ${port + 1}`);
         process.exit(1);
       });
+      return;
+    }
+
+    case "mcp": {
+      // stdout carries the MCP protocol: nothing else may be printed to it.
+      const { createApp } = await import("../server/app.ts");
+      const { createMcpServer } = await import("../mcp/server.ts");
+      const { apiCaller } = await import("../mcp/call.ts");
+      const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js");
+      const store = await openStore();
+      const app = createApp({ store, mode: "local", localPerson: cfg.person, contextCommand: selfCommand("context") });
+      await createMcpServer(apiCaller(app), { canApply: true }).connect(new StdioServerTransport());
       return;
     }
 
