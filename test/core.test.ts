@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeIssue, findingsByCause, startFiles } from "../src/core/describe.ts";
+import { CAUSE, describeIssue, findingsByCause, startFiles, variantsByMessage } from "../src/core/describe.ts";
 import { findIssues, program, signature } from "../src/core/issues.ts";
 import { describeInput, parseClaudeSession, shortToolName } from "../src/core/parse-claude.ts";
 import { clip, redact, redactCounted } from "../src/core/redact.ts";
@@ -140,6 +140,25 @@ describe("parseClaudeSession", () => {
     const t = parseClaudeSession("x", "not json\n\n", { person: "Ada" });
     expect(t.steps).toEqual([]);
     expect(t.session.title).toBe("Untitled session");
+  });
+});
+
+describe("variantsByMessage", () => {
+  it("groups variants that said the same thing, names each tool once, most commands first", () => {
+    // Stored titles are already normalized, so the same error from two tools has the same words.
+    const missing = (tool: string, key: string) => ({ key, kind: "tool_error" as const, title: `${tool} failed: Error: Cannot find module <path>`, tool, windowSessions: 2 });
+    const list = variantsByMessage(
+      [missing("Bash", "a"), missing("Read", "b"), { key: "c", kind: "tool_error", title: "Bash failed: Exit code 2", tool: "Bash", windowSessions: 5 }],
+      { a: "Error: Cannot find module './x'" },
+    );
+    expect(list).toHaveLength(2);
+    expect(list[0]).toMatchObject({ commands: 2, message: "Error: Cannot find module './x'", sessions: 2 });
+    expect(list[0].tools).toHaveLength(2);
+    expect(list[1]).toMatchObject({ commands: 1, sessions: 5 });
+  });
+
+  it("names the causes other code acts on from one list", () => {
+    expect(describeIssue({ kind: "tool_error", title: "Edit failed: <tool_use_error>File has not been read yet. Read it first before writing to it.</tool_use_error>" }).what).toBe(CAUSE.unread);
   });
 });
 

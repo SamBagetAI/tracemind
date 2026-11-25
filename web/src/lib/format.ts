@@ -3,7 +3,7 @@
  * thresholds that decide colour, and short paths. Issue wording and grouping come from
  * src/core/describe.ts, which the server uses too.
  */
-export { KIND, causeKey, describeIssue, projectName, toolLabel, topTools } from "../../../src/core/describe";
+export { CAUSE, KIND, UNNAMED, causeKey, describeIssue, projectName, toolLabel, topTools, variantsByMessage } from "../../../src/core/describe";
 export { DAY, daysAgo } from "../../../src/core/time";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];

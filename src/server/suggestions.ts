@@ -17,7 +17,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileS
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { claudeHome, hasHook, setHook } from "../cli/claude.ts";
-import { causeKey, describeIssue } from "../core/describe.ts";
+import { CAUSE, causeKey, describeIssue } from "../core/describe.ts";
 import { daysAgo } from "../core/time.ts";
 import type { Row } from "../store/db.ts";
 import { causeKeys, issueGroups, type IssueGroup } from "../store/insights.ts";
@@ -93,10 +93,6 @@ function projectInstructionFile(root: string): string {
 
 const sid = (...parts: string[]) => createHash("sha1").update(parts.join("\n")).digest("hex").slice(0, 12);
 
-function byWhat(groups: IssueGroup[], what: string) {
-  return groups.find((g) => g.what === what);
-}
-
 /** The latest sessions that hit any of the issues, each session once, at its first such step. */
 async function examplesFor(store: Store, ws: string, keys: string[], limit = 3) {
   if (keys.length === 0) return [];
@@ -139,25 +135,25 @@ async function facts(store: Store, ws: string, days: number) {
 /** Rules that hold everywhere, keyed by the cause they prevent. */
 const GLOBAL_RULES: { what: string; title: string; text: string; min: number }[] = [
   {
-    what: "Waited with sleep, which is blocked",
+    what: CAUSE.sleep,
     title: "Stop agents from waiting with sleep",
     text: "To wait for something, run the command in the background or watch for it with Monitor; never use `sleep`, which is blocked.",
     min: 3,
   },
   {
-    what: "Edited a file before reading it",
+    what: CAUSE.unread,
     title: "Read files before editing them",
     text: "Read a file in this conversation before editing or overwriting it.",
     min: 3,
   },
   {
-    what: "Text to replace was not in the file",
+    what: CAUSE.textNotFound,
     title: "Edit from a fresh read",
     text: "Copy the text to replace from a fresh Read of the file; when an Edit fails, read the file again instead of retrying the same edit.",
     min: 3,
   },
   {
-    what: "Edited a file that changed since it was read",
+    what: CAUSE.changedSinceRead,
     title: "Re-read files that changed",
     text: "When a file changed since you read it, read it again before editing it.",
     min: 3,
@@ -171,7 +167,7 @@ export async function buildSuggestions(store: Store, ws: string, local: boolean,
 
   // 1. Global rules for causes that happen across projects.
   for (const rule of GLOBAL_RULES) {
-    const g = byWhat(f.groups, rule.what);
+    const g = f.groups.find((g) => g.what === rule.what);
     if (!g || g.sessions < rule.min) continue;
     covered.add(g.id);
     out.push({
@@ -197,7 +193,7 @@ export async function buildSuggestions(store: Store, ws: string, local: boolean,
     if (sessions.size < 2) continue;
     const vars = [...new Set(rows.flatMap((r) => String(r.input).match(/\b[A-Z][A-Z0-9_]*(?:DATABASE_URL|_DSN|_URI)\b/g) ?? []))].slice(0, 3);
     const named = vars.length ? ` (for example ${vars.map((v) => `\`${v}\``).join(", ")} in \`.env\` files)` : "";
-    const refused = f.groups.find((g) => g.what === "Refused by the auto-mode classifier");
+    const refused = f.groups.find((g) => g.what === CAUSE.classifier);
     out.push({
       id: sid("prod", root),
       kind: "rule",
@@ -216,7 +212,7 @@ export async function buildSuggestions(store: Store, ws: string, local: boolean,
   }
 
   // 3. Connectors that are not signed in.
-  const signIn = byWhat(f.groups, "Not signed in to the service");
+  const signIn = f.groups.find((g) => g.what === CAUSE.notSignedIn);
   if (signIn) {
     covered.add(signIn.id);
     const servers = new Map<string, { sessions: number; keys: string[] }>();
@@ -286,7 +282,7 @@ export async function buildSuggestions(store: Store, ws: string, local: boolean,
 
   // 6. Recurring causes no rule covers: hand them to Claude to find out why.
   // Not worth an investigation: a bare exit code is mostly grep or test finding nothing.
-  const notWorth = new Set(["Refused by the auto-mode classifier", "Exited with an error code", "Refused by a built-in safety check"]);
+  const notWorth = new Set<string>([CAUSE.classifier, CAUSE.exitCode, CAUSE.safetyCheck]);
   for (const g of f.groups.filter((g) => g.sessions >= 5 && !covered.has(g.id) && g.kind !== "interrupted" && !notWorth.has(g.what)).slice(0, 3)) {
     const ex = await examplesFor(store, ws, g.issues.map((i) => i.key), 3);
     out.push({
@@ -478,8 +474,8 @@ export async function setState(store: Store, ws: string, id: string, status: Sug
 
 /** What to tell an agent about each known cause, for the SessionStart hook. */
 const ADVICE: Record<string, string> = Object.fromEntries(GLOBAL_RULES.map((r) => [r.what, r.text]));
-ADVICE["Refused by the auto-mode classifier"] = "Expect refusals for production data, shared resources and deploys: ask the person instead of retrying another way.";
-ADVICE["Not signed in to the service"] = "Some connectors here are not signed in: if a call says unauthorized, tell the person instead of retrying.";
+ADVICE[CAUSE.classifier] = "Expect refusals for production data, shared resources and deploys: ask the person instead of retrying another way.";
+ADVICE[CAUSE.notSignedIn] = "Some connectors here are not signed in: if a call says unauthorized, tell the person instead of retrying.";
 
 /** The text a new session gets: up to five problems from its own project's recent sessions. */
 export async function sessionContext(store: Store, ws: string, cwd: string): Promise<string> {
@@ -508,7 +504,7 @@ export async function sessionContext(store: Store, ws: string, cwd: string): Pro
   }
   // A bare exit code is mostly grep or a test finding nothing: not worth a new session's attention.
   const top = [...byCause.values()]
-    .filter((e) => e.sessions.size >= 3 && e.what !== "Exited with an error code")
+    .filter((e) => e.sessions.size >= 3 && e.what !== CAUSE.exitCode)
     .sort((a, b) => b.sessions.size - a.sessions.size)
     .slice(0, 5);
   if (top.length === 0) return "";

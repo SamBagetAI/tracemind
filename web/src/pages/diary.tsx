@@ -9,8 +9,8 @@ import { useState } from "react";
 import { Link } from "react-router";
 import { Failed, Loading } from "@/components/shell";
 import { useApi, type Overview, type Session, type Suggestion } from "@/lib/api";
-import { activeLabel, byDay, relativeDay, dollars, localDay, sentence, tokens, worthALook } from "@/lib/diary";
-import { DAY, plural, projectName } from "@/lib/format";
+import { activeLabel, byDay, relativeDay, dollars, localDay, sentence, worthALook } from "@/lib/diary";
+import { DAY, compact, plural, projectName } from "@/lib/format";
 import { useWindow } from "@/lib/window";
 
 const PAGE = 30;
@@ -25,7 +25,7 @@ function Stats({ o, days }: { o: Overview; days: number }) {
       <Link to="/sessions" className="hover:underline">{n(o.sessions)} {o.sessions === 1 ? "session" : "sessions"}</Link>, {n(activeLabel(o.activeMs))} of active time with Claude.{" "}
       <Link to="/sessions?show=clean" className="hover:underline">{n(clean)} ran clean</Link>
       {p.sessions > 0 && <span className="text-muted-foreground"> ({p.sessions - p.withIssues} of {p.sessions} the {days} days before)</span>}.{" "}
-      <Link to="/tools?kind=sessions" className="hover:underline">{n(o.toolErrors.toLocaleString("en-US"))} failed calls</Link>, {n(tokens(o.outputTokens))} tokens out
+      <Link to="/tools?kind=sessions" className="hover:underline">{n(o.toolErrors.toLocaleString("en-US"))} failed calls</Link>, {n(compact(o.outputTokens))} tokens out
       {o.costUsd > 0 && <span className="text-muted-foreground">, about {dollars(o.costUsd)} at API prices</span>}.
     </p>
   );
