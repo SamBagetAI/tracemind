@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 import { WINDOWS, useWindow, type Days } from "@/lib/window";
 
 const NAV: [string, string][] = [
-  ["/", "Overview"],
+  ["/", "Diary"],
   ["/sessions", "Sessions"],
   ["/issues", "Issues"],
   ["/fixes", "Fixes"],

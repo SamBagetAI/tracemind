@@ -8,7 +8,7 @@ import { IssuePage } from "@/pages/issue";
 import { IssuesPage } from "@/pages/issues";
 import { LoginPage } from "@/pages/login";
 import { MemoryPage } from "@/pages/memory";
-import { OverviewPage } from "@/pages/overview";
+import { DiaryPage } from "@/pages/diary";
 import { SessionPage } from "@/pages/session";
 import { SessionsPage } from "@/pages/sessions";
 import { SuggestionsPage } from "@/pages/suggestions";
@@ -28,7 +28,7 @@ function App() {
             element={
               <Shell>
                 <Routes>
-                  <Route path="/" element={<OverviewPage />} />
+                  <Route path="/" element={<DiaryPage />} />
                   <Route path="/sessions" element={<SessionsPage />} />
                   <Route path="/sessions/:id" element={<SessionPage />} />
                   <Route path="/issues" element={<IssuesPage />} />

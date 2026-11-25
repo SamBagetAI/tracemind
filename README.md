@@ -7,6 +7,10 @@ started, and the **memory it used**: the CLAUDE.md and AGENTS.md files it loaded
 read, and the memory files it read and wrote. Failures are grouped into issues across sessions,
 and an issue you mark resolved opens again if it happens in a later session.
 
+The home page is a diary: how the week went in one sentence (sessions, active time, how many ran
+clean, failed calls, tokens and the cost at API prices), then each session in one line with what went
+wrong highlighted.
+
 It runs on your machine first. When a team wants one shared view, the same app runs as a server.
 
 ## On your machine
@@ -21,7 +25,8 @@ tracemind ui                    # opens http://localhost:4545
 ```
 
 Data lives in `~/.tracemind/tracemind.db` (SQLite) and never leaves the machine unless you link a
-server. `tracemind setup claude-code --project` adds the hooks to one repo only;
+server. Active time and cost were added in 0.2: run `tracemind import` once to fill them in for older
+sessions. `tracemind setup claude-code --project` adds the hooks to one repo only;
 `tracemind uninstall claude-code` takes them out.
 
 ## Shared server

@@ -57,6 +57,18 @@ describe("numbers the pages show", () => {
     for (const ref of Object.values(t.issues) as { fix: unknown }[]) expect(["ready", "applied", null]).toContain(ref.fix);
   });
 
+  it("gives the Diary its totals, the period before, and each session's issues", async () => {
+    const { app } = await localApp();
+    const o = await (await app.request("/api/overview?days=3650")).json();
+    expect(o.activeMs).toBeGreaterThan(0);
+    expect(o.previous.sessions).toBe(0);
+    const [s] = await (await app.request("/api/sessions?days=3650&issues=1")).json();
+    expect(s.activeMs).toBe(o.activeMs);
+    expect(s.issues.length).toBe(4);
+    expect(s.issues[0]).toMatchObject({ what: expect.any(String), seq: expect.any(Number), key: expect.any(String) });
+    expect(s.issues.map((i: { seq: number }) => i.seq)).toEqual([...s.issues.map((i: { seq: number }) => i.seq)].sort((a: number, b: number) => a - b));
+  });
+
   it("drops sessions outside the window from the list", async () => {
     const { app } = await localApp();
     const far = await (await app.request("/api/sessions?days=1")).json();

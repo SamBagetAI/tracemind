@@ -39,6 +39,8 @@ function toSession(r: Row): Session & { receivedAt: string; pushedAt: string | n
     toolErrors: n(r.tool_errors),
     inputTokens: n(r.input_tokens),
     outputTokens: n(r.output_tokens),
+    activeMs: n(r.active_ms),
+    costUsd: Number(r.cost_usd ?? 0),
     receivedAt: String(r.received_at),
     pushedAt: (r.pushed_at as string) ?? null,
     issueCount: n(r.issue_count),
@@ -99,6 +101,14 @@ export class Store {
     } catch {
       // Already there.
     }
+    // Active time and estimated cost came later too; `tracemind import` fills them for old sessions.
+    for (const col of ["active_ms BIGINT NOT NULL DEFAULT 0", "cost_usd DOUBLE PRECISION NOT NULL DEFAULT 0"]) {
+      try {
+        await this.db.exec(`ALTER TABLE sessions ADD COLUMN ${col}`);
+      } catch {
+        // Already there.
+      }
+    }
     // Repair first/last seen from the sessions (older versions kept the first-saved session's date).
     await this.db.run(
       `UPDATE issues SET
@@ -141,9 +151,9 @@ export class Store {
         db,
         "sessions",
         ["workspace", "id", "agent", "person", "project", "title", "git_branch", "model", "agent_version", "started_at",
-          "ended_at", "outcome", "step_count", "tool_calls", "tool_errors", "input_tokens", "output_tokens", "received_at", "pushed_at"],
+          "ended_at", "outcome", "step_count", "tool_calls", "tool_errors", "input_tokens", "output_tokens", "active_ms", "cost_usd", "received_at", "pushed_at"],
         [[ws, s.id, s.agent, person, redact(s.project), redact(s.title), s.gitBranch, s.model, s.agentVersion, s.startedAt,
-          s.endedAt, s.outcome, s.stepCount, s.toolCalls, s.toolErrors, s.inputTokens, s.outputTokens, now(), prior[0]?.pushed_at ?? null]],
+          s.endedAt, s.outcome, s.stepCount, s.toolCalls, s.toolErrors, s.inputTokens, s.outputTokens, s.activeMs ?? 0, s.costUsd ?? 0, now(), prior[0]?.pushed_at ?? null]],
       );
       await insertMany(
         db,
@@ -277,7 +287,9 @@ export class Store {
               CAST(COALESCE(SUM(tool_calls), 0) AS BIGINT) AS tool_calls,
               CAST(COALESCE(SUM(tool_errors), 0) AS BIGINT) AS tool_errors,
               CAST(COALESCE(SUM(input_tokens), 0) AS BIGINT) AS input_tokens,
-              CAST(COALESCE(SUM(output_tokens), 0) AS BIGINT) AS output_tokens
+              CAST(COALESCE(SUM(output_tokens), 0) AS BIGINT) AS output_tokens,
+              CAST(COALESCE(SUM(active_ms), 0) AS BIGINT) AS active_ms,
+              COALESCE(SUM(cost_usd), 0) AS cost_usd
          FROM sessions WHERE workspace = ? AND started_at >= ?`,
       [ws, since],
     );
@@ -312,6 +324,8 @@ export class Store {
       toolErrors: n(totals?.tool_errors),
       inputTokens: n(totals?.input_tokens),
       outputTokens: n(totals?.output_tokens),
+      activeMs: n(totals?.active_ms),
+      costUsd: Number(totals?.cost_usd ?? 0),
       openIssues: n(open?.open),
       /** Sessions where at least one failure was found. */
       withIssues: n(troubled?.c),

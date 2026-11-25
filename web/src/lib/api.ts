@@ -22,9 +22,17 @@ export type Session = {
   inputTokens: number;
   outputTokens: number;
   issueCount: number;
+  /** Time spent working (gaps between steps, each up to 15 minutes). */
+  activeMs: number;
+  /** What it would cost at Claude API list prices, in US dollars. */
+  costUsd: number;
   /** Where the session failed, 0–1 along it (only when asked for with marks=1). */
   marks?: { at: number; kind: "error" | "interrupt" }[];
+  /** The issues it hit, one per cause, in the order it first hit them (only with issues=1). */
+  issues?: SessionIssue[];
 };
+
+export type SessionIssue = { what: string; seq: number; key: string };
 
 export type Step = {
   seq: number;
@@ -106,7 +114,11 @@ export type Overview = {
   toolErrors: number;
   inputTokens: number;
   outputTokens: number;
+  activeMs: number;
+  costUsd: number;
   openIssues: number;
+  /** The period of the same length just before the window. */
+  previous: { sessions: number; withIssues: number; activeMs: number; toolErrors: number; outputTokens: number; costUsd: number };
   strip: { id: string; title: string; startedAt: string; issues: number }[];
 };
 

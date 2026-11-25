@@ -1,42 +1,44 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-@import "@fontsource-variable/ibm-plex-sans";
+@import "@fontsource-variable/schibsted-grotesk";
 @import "@fontsource/ibm-plex-mono/400.css";
 @import "@fontsource/ibm-plex-mono/500.css";
 
 /*
- * Tracemind's tokens, from DESIGN.md: near-black panes, IBM Plex Sans for words, IBM Plex Mono for machine
- * text, red only for failure, neutral links and selection. shadcn/ui components read these.
+ * Tracemind's tokens, from DESIGN.md section 12: warm paper and ink, Schibsted Grotesk for words,
+ * IBM Plex Mono for machine text, a highlighter mark for what went wrong, red only for failure.
+ * shadcn/ui components read these. The dark set is kept for anyone who turns it on.
  */
 
 @custom-variant dark (&:is(.dark *));
 
 :root {
   --radius: 6px;
-  --background: #fbfbfa;
-  --foreground: #17171a;
-  --pane: #f4f4f2;
-  --raise: #ebebe8;
-  --card: #ffffff;
-  --card-foreground: #17171a;
-  --popover: #ffffff;
-  --popover-foreground: #17171a;
-  --primary: #17171a;
-  --primary-foreground: #fbfbfa;
-  --secondary: #ebebe8;
-  --secondary-foreground: #17171a;
-  --muted: #efefec;
-  --muted-foreground: #66665f;
-  --faint: #8f8f88;
-  --accent: #ebebe8;
-  --accent-foreground: #17171a;
-  --destructive: #c62a2f;
-  --fail: #c62a2f;
-  --warn: #a86400;
-  --ok: #2f7d4f;
-  --border: #e2e2dd;
-  --input: #dcdcd6;
-  --ring: #9a9a93;
+  --background: #fbf8f1;
+  --foreground: #1d1b18;
+  --pane: #f5f1e7;
+  --raise: #efe9dc;
+  --card: #fffdf8;
+  --card-foreground: #1d1b18;
+  --popover: #fffdf8;
+  --popover-foreground: #1d1b18;
+  --primary: #1d1b18;
+  --primary-foreground: #fbf8f1;
+  --secondary: #efe9dc;
+  --secondary-foreground: #1d1b18;
+  --muted: #f0ebdf;
+  --muted-foreground: #6d685f;
+  --faint: #8f897d;
+  --accent: #f0eadc;
+  --accent-foreground: #1d1b18;
+  --destructive: #b8322b;
+  --fail: #b8322b;
+  --warn: #9a6400;
+  --ok: #3f7f52;
+  --mark: #ffe58a;
+  --border: #e9e2d3;
+  --input: #ddd5c4;
+  --ring: #a59d8d;
 }
 
 .dark {
@@ -67,7 +69,7 @@
 }
 
 @theme inline {
-  --font-sans: "IBM Plex Sans Variable", system-ui, sans-serif;
+  --font-sans: "Schibsted Grotesk Variable", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -116,3 +118,23 @@
     font-variant-numeric: tabular-nums;
   }
 }
+
+/* The Diary: the numbers as one sentence, and a highlighter mark on what went wrong. */
+.diary-stats {
+  margin: 14px 0 18px;
+  max-width: 46ch;
+  font-size: 21px;
+  line-height: 1.45;
+  letter-spacing: -0.01em;
+}
+@media (max-width: 640px) {
+  .diary-stats { font-size: 18px; }
+}
+.diary-mark {
+  background: linear-gradient(transparent 55%, var(--mark) 55%);
+  padding: 0 1px;
+  text-decoration: none;
+  color: inherit;
+}
+.diary-mark:hover { background: var(--mark); }
+.dark .diary-mark { background: linear-gradient(transparent 55%, rgba(255, 214, 90, .35) 55%); }

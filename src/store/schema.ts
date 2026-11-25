@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   tool_errors INTEGER NOT NULL,
   input_tokens BIGINT NOT NULL,
   output_tokens BIGINT NOT NULL,
+  active_ms BIGINT NOT NULL DEFAULT 0,
+  cost_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
   received_at TEXT NOT NULL,
   pushed_at TEXT,
   PRIMARY KEY (workspace, id)

@@ -2,6 +2,7 @@
  * Turns a Claude Code session transcript (the JSONL file in ~/.claude/projects) into a Trace.
  * The format is not a public contract: unknown lines are skipped, never fatal.
  */
+import { activeMs, costOf } from "./pricing.ts";
 import { createHash } from "node:crypto";
 import { clip, redact } from "./redact.ts";
 import { findIssues } from "./issues.ts";
@@ -235,6 +236,8 @@ function collect(lines: Line[], sidechainFile: boolean, memory: MemoryEvent[], s
           meta.inputTokens +=
             (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0);
           meta.outputTokens += u.output_tokens ?? 0;
+          // Subagents run on their own model, so each response is priced by the model that wrote it.
+          meta.costUsd += costOf(m.model, u);
         }
         if (!Array.isArray(m.content)) break;
         for (const b of m.content) {
@@ -294,6 +297,7 @@ type Meta = {
   lastAt?: string;
   inputTokens: number;
   outputTokens: number;
+  costUsd: number;
   usageSeen: Set<string>;
   loaded: Map<string, string>;
 };
@@ -311,7 +315,7 @@ function outcomeOf(steps: Step[], running: boolean): Outcome {
 }
 
 export function parseClaudeSession(sessionId: string, transcript: string | string[], opts: ParseOptions): Trace {
-  const meta: Meta = { inputTokens: 0, outputTokens: 0, usageSeen: new Set(), loaded: new Map() };
+  const meta: Meta = { inputTokens: 0, outputTokens: 0, costUsd: 0, usageSeen: new Set(), loaded: new Map() };
   const steps: Draft[] = [];
   const memory: MemoryEvent[] = [];
 
@@ -362,6 +366,8 @@ export function parseClaudeSession(sessionId: string, transcript: string | strin
     toolErrors: tools.filter((s) => s.isError).length,
     inputTokens: meta.inputTokens,
     outputTokens: meta.outputTokens,
+    activeMs: activeMs(ordered.filter((s) => !s.sidechain).map((s) => s.at).sort()),
+    costUsd: Math.round(meta.costUsd * 10000) / 10000,
   };
 
   return { session: { ...session, project: redact(session.project) }, steps: ordered, memory: sortedMemory, findings: findIssues(ordered, fingerprints) };

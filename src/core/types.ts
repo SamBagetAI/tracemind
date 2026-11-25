@@ -22,6 +22,10 @@ export type Session = {
   toolErrors: number;
   inputTokens: number;
   outputTokens: number;
+  /** Time spent working: gaps between steps, each counted up to 15 minutes. */
+  activeMs?: number;
+  /** What the session would cost at Claude API list prices, in US dollars (src/core/pricing.ts). */
+  costUsd?: number;
 };
 
 export type StepKind = "prompt" | "reply" | "tool" | "subagent" | "compact" | "interrupt";

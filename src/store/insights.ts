@@ -229,3 +229,24 @@ export async function causeCounts(store: Store, ws: string, since: string) {
   for (const g of await issueGroups(store, ws, since)) for (const i of g.issues) out.set(i.key, { cause: g.id, what: g.what, sessions: g.sessions });
   return out;
 }
+
+/**
+ * For each session, the issues it hit, one per cause, in the order it first hit them, with the
+ * step. What a sentence about the session says went wrong.
+ */
+export async function sessionIssues(store: Store, ws: string, ids: string[]) {
+  const out: Record<string, { what: string; seq: number; key: string }[]> = {};
+  if (ids.length === 0) return out;
+  const rows = await store.db.all<Row>(
+    `SELECT f.session_id, f.seq, f.key, i.kind, i.title FROM findings f JOIN issues i ON i.workspace = f.workspace AND i.key = f.key
+      WHERE f.workspace = ? AND f.session_id IN (${ids.map(() => "?").join(", ")}) ORDER BY f.session_id, f.seq`,
+    [ws, ...ids],
+  );
+  for (const r of rows) {
+    const d = describeIssue({ kind: r.kind as never, title: String(r.title) });
+    const list = (out[String(r.session_id)] ??= []);
+    const what = d.plain ? d.what : "an error without a name yet";
+    if (!list.some((x) => x.what === what)) list.push({ what, seq: n(r.seq), key: String(r.key) });
+  }
+  return out;
+}

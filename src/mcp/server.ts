@@ -103,6 +103,10 @@ export function createMcpServer(call: ApiCall, opts: { canApply: boolean }): Mcp
         hitAnIssue: o.withIssues,
         toolCalls: o.toolCalls,
         toolCallsFailed: o.toolErrors,
+        activeHours: Math.round((o.activeMs / 3600000) * 10) / 10,
+        outputTokens: o.outputTokens,
+        estimatedCostUsdAtApiPrices: Math.round(o.costUsd * 100) / 100,
+        previousPeriod: o.previous,
         topIssues: (groups as Group[]).filter((g) => g.plain && g.sessions > 1).slice(0, 5).map(issueRow),
         fixesToReview: (fixes as Suggestion[]).filter((s) => s.status === "open").sort((a, b) => b.sessions - a.sessions).slice(0, 3).map((s) => ({ id: s.id, title: s.title, sessionsAffected: s.sessions })),
       });
@@ -187,12 +191,12 @@ export function createMcpServer(call: ApiCall, opts: { canApply: boolean }): Mcp
       const q = new URLSearchParams({ days: String(days), limit: "2000" });
       if (query) q.set("q", query);
       if (project) q.set("project", project);
-      const list: { id: string; title: string; project: string; gitBranch: string | null; startedAt: string; endedAt: string; toolCalls: number; toolErrors: number; issueCount: number; person: string }[] = await call(`/sessions?${q}`);
+      const list: { id: string; title: string; project: string; gitBranch: string | null; startedAt: string; endedAt: string; toolCalls: number; toolErrors: number; issueCount: number; person: string; activeMs: number; costUsd: number }[] = await call(`/sessions?${q}`);
       const shown = list.filter((s) => !only_with_issues || s.issueCount > 0);
       return text({
         window: `last ${days} days`,
         total: shown.length,
-        sessions: shown.slice(0, limit).map((s) => ({ id: s.id, title: s.title, project: s.project, branch: s.gitBranch, person: s.person, started: s.startedAt, lastActive: s.endedAt, toolCalls: s.toolCalls, failedCalls: s.toolErrors, issues: s.issueCount })),
+        sessions: shown.slice(0, limit).map((s) => ({ id: s.id, title: s.title, project: s.project, branch: s.gitBranch, person: s.person, started: s.startedAt, lastActive: s.endedAt, toolCalls: s.toolCalls, failedCalls: s.toolErrors, issues: s.issueCount, activeMinutes: Math.round(s.activeMs / 60000), estimatedCostUsd: Math.round(s.costUsd * 100) / 100 })),
       });
     },
   );

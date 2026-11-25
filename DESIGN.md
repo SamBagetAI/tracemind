@@ -514,3 +514,29 @@ Five products that do part of Tracemind's job well, and the one idea each lends.
 | [Dependabot pull requests](https://docs.github.com/en/code-security/concepts/supply-chain-security/about-dependabot-pull-requests) | Each change arrives as a pull request with its release notes and a compatibility score. [Research](https://arxiv.org/abs/2403.09012v1) on that score warns against showing it without its sample size. | A fix to your Claude setup is a pull request: a diff, the evidence, a confidence from how many sessions, and after merging, checks that say whether it worked. |
 
 The five concepts in `design/ux-concepts.html` (kept local: it shows the author's sessions) each take one of these as the main idea.
+
+## 12. The Diary (chosen 25 Nov 2026)
+
+The five concepts in section 11 were too much to read, too much like developer tools, and too generic.
+The direction instead: **what happened first, glanceable, light**, with a small line of numbers on top.
+Of three light feed mocks (Diary, Strips, Week), the Diary was chosen.
+
+**The home page is a diary.**
+- One sentence of numbers for the window: sessions, active time, how many ran clean (with the same
+  number for the period before), failed calls, tokens out, and the cost at API prices. It is a
+  sentence, not four stat cards, and every number links to its list.
+- Then the sessions, day by day (Today, Yesterday, Mon 23…), newest first. Each is a title, the project
+  and active time, and one sentence: "8 failed calls: Refused by the auto-mode classifier, Exited with
+  an error code and 3 more." What went wrong has a highlighter mark, and opens its issue.
+- "2 fixes to review" sits under the numbers when there are any. The fix cards stay on the Fixes page.
+
+**Active time** counts the gaps between steps, each up to 15 minutes, so a session left open overnight
+is not 17 hours of work (`src/core/pricing.ts`).
+
+**Cost** is what the session would cost at Claude API list prices, per response and per model (a
+subagent on another model is priced at its own rate), with cache reads and writes at their own prices.
+On a subscription nobody pays per token, so the page says "at API prices". Unknown models count as 0.
+
+**The look is warm paper and ink**: background `#fbf8f1`, ink `#1d1b18`, borders `#e9e2d3`, a yellow
+highlighter `#ffe58a` under what went wrong, red kept for failures. Schibsted Grotesk for words, IBM Plex
+Mono for machine text. Light is the default; the dark tokens remain for later.
