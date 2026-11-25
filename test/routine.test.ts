@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { describeIssue } from "../src/core/describe.ts";
-import { parseRoutineRuns, routineEvents } from "../src/core/parse-routine.ts";
+import { parseRoutineRuns, routineEvents, routineRunId, routineSessionOf } from "../src/core/parse-routine.ts";
+import { openSqlite } from "../src/store/db.ts";
+import { Store } from "../src/store/store.ts";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 /** Two runs of a routine and one turn the person started, in the condensed log format claude.ai returns. */
 const LOG = `[2026-11-24T16:12:50.100000Z] env[info]: Allocating sandbox
@@ -84,6 +89,21 @@ describe("routine runs", () => {
     const whole = parseRoutineRuns(LOG, opts);
     expect(whole[1].session.id).toBe(runs[0].session.id);
     expect(whole[0].session.id).toBe("routine-session_01ABC-20261124163423698");
+  });
+
+  it("reads the claude.ai session back out of a run's id, and nothing out of another session's", () => {
+    expect(routineRunId("session_01ABC", "2026-11-24T16:34:23.698Z")).toBe("routine-session_01ABC-20261124163423698");
+    expect(routineSessionOf("routine-session_01ABC-20261124163423698")).toBe("session_01ABC");
+    expect(routineSessionOf("sess-1")).toBeNull();
+  });
+
+  it("counts the runs a person started (a reply) apart from the ones the schedule fired", async () => {
+    const store = new Store(await openSqlite(join(mkdtempSync(join(tmpdir(), "tm-")), "t.db")));
+    await store.migrate();
+    for (const t of parseRoutineRuns(LOG, opts)) await store.saveTrace("w", t);
+    const o = await store.overview("w", "2000", "routines");
+    expect(o.sessions).toBe(3);
+    expect(o.replies).toBe(1);
   });
 
   it("gives a result to the waiting call it names, when calls ran together", () => {

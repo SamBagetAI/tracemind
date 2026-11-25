@@ -9,7 +9,7 @@ import type { Brief } from "./types.ts";
 const BRIEF_OPENING = "Tracemind, from this project's recent Claude Code sessions.";
 import { createHash } from "node:crypto";
 import { clip, redact } from "./redact.ts";
-import { findIssues } from "./issues.ts";
+import { findIssues, isToolStep } from "./issues.ts";
 import type { MemoryEvent, Outcome, Session, Step, Trace } from "./types.ts";
 
 const INPUT_MAX = 2000;
@@ -327,7 +327,7 @@ function outcomeOf(steps: Step[], running: boolean): Outcome {
   const last = main[main.length - 1];
   if (last?.kind === "interrupt") return "interrupted";
   if (running) return "running";
-  const lastTool = [...main].reverse().find((s) => s.kind === "tool" || s.kind === "subagent");
+  const lastTool = [...main].reverse().find(isToolStep);
   const lastIndex = lastTool ? main.lastIndexOf(lastTool) : -1;
   const repliedAfter = main.slice(lastIndex + 1).some((s) => s.kind === "reply");
   if (lastTool?.isError && !repliedAfter) return "error";
@@ -365,7 +365,7 @@ export function parseClaudeSession(sessionId: string, transcript: string | strin
       return { ...m, seq };
     });
 
-  const tools = ordered.filter((s) => s.kind === "tool" || s.kind === "subagent");
+  const tools = ordered.filter(isToolStep);
   const titleSource = meta.title ?? meta.summary ?? meta.firstPrompt ?? "Untitled session";
   const firstLine = titleSource.split("\n").find((l) => l.trim()) ?? titleSource;
 

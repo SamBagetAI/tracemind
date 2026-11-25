@@ -5,8 +5,9 @@ import { Empty, Failed, Loading, Page } from "@/components/shell";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { useApi, type Session, type Viewer } from "@/lib/api";
-import { projectName } from "@/lib/format";
+import { useApi, type Session } from "@/lib/api";
+import { useViewer } from "@/lib/viewer";
+import { plural, projectName } from "@/lib/format";
 import { useWindow } from "@/lib/window";
 
 const ALL = "__all";
@@ -17,7 +18,7 @@ export function SessionsPage() {
   // Your own sessions, or the runs of your claude.ai routines.
   const [kind, setKind] = useState(params.get("kind") === "routines" ? "routines" : "sessions");
   const list = useApi<Session[]>(`/sessions?limit=2000&marks=1&days=${days}&kind=${kind}`);
-  const me = useApi<Viewer>("/me");
+  const me = useViewer();
   const [project, setProject] = useState(ALL);
   const [show, setShow] = useState(params.get("show") ?? "all");
   const [q, setQ] = useState("");
@@ -36,7 +37,7 @@ export function SessionsPage() {
   const people = new Set((list.data ?? []).map((s) => s.person));
 
   return (
-    <Page title={kind === "routines" ? "Routine runs" : "Sessions"} lead={list.data && <span className="text-[13px] num">{list.data.length.toLocaleString("en-US")} {kind === "routines" ? "routine runs" : "sessions"} started in the last {days} days</span>}>
+    <Page title={kind === "routines" ? "Routine runs" : "Sessions"} lead={list.data && <span className="text-[13px] num">{plural(list.data.length, kind === "routines" ? "routine run" : "session")} started in the last {days} days</span>}>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <ToggleGroup type="single" value={kind} onValueChange={(v) => v && setKind(v)} variant="outline" size="sm" aria-label="Sessions or routine runs">
           <ToggleGroupItem value="sessions" className="h-8 px-3">Your sessions</ToggleGroupItem>
@@ -66,7 +67,7 @@ export function SessionsPage() {
       {!list.data && !list.error && <Loading rows={12} />}
       {list.data && (
         <div>
-          {shown.length ? <SessionsTable sessions={shown} showPerson={people.size > 1 || me.data?.mode === "server"} /> : <Empty>No session matches.</Empty>}
+          {shown.length ? <SessionsTable sessions={shown} showPerson={people.size > 1 || me?.mode === "server"} /> : <Empty>No session matches.</Empty>}
           {shown.length !== list.data.length && (
             <p className="mt-2 text-[12px] text-faint num">
               {shown.length.toLocaleString("en-US")} of {list.data.length.toLocaleString("en-US")} shown

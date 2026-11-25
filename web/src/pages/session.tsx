@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useApi, type Finding, type IssueRef, type MemoryEvent, type Session, type Step, type Trace } from "@/lib/api";
+import { useApi, type Finding, type IssueRef, type MemoryEvent, type Step, type Trace } from "@/lib/api";
 import { compact, describeIssue, duration, elapsed, fullDate, num, plainText, plural, projectName, sessionsLevel, LEVEL_CLASS, shortPath, memoryLabel, splitPath, when } from "@/lib/format";
 import { activeLabel } from "@/lib/diary";
 import { buildRows, commandLine, diagnosis, errorDetail, failureAnchors, findingsByCause, foldSummary, nextAnchor, startFiles, timeline, type Row } from "@/lib/trace";
@@ -292,7 +292,7 @@ function FoldRow({ steps, open, onToggle, children }: { steps: Step[]; open: boo
 function SidePanel({ t, onJump }: { t: Trace; onJump: (seq: number) => void }) {
   const atStart = startFiles(t.memory);
   const used = [...new Map(t.memory.filter((m) => m.source !== "instructions").map((m) => [`${m.op}:${m.ref}`, m])).values()];
-  const issues = findingsByCause(t);
+  const issues = findingsByCause(t.findings, t.issues);
   return (
     <aside className="hidden xl:block">
       <div className="sticky top-16 grid gap-6 pt-5 text-[13px]">
@@ -352,23 +352,10 @@ function SidePanel({ t, onJump }: { t: Trace; onJump: (seq: number) => void }) {
 // ---------------------------------------------------------------- page
 
 /**
- * The sessions before and after this one, among the sessions in the window. A session outside the
- * window is browsed among all sessions, and the header says so.
+ * The header's arrows browse the sessions before and after this one (the server's `nav`), among the
+ * sessions in the window. A session outside the window is browsed among all sessions, and the header says so.
  */
-function useNeighbours(id: string, days: number) {
-  const list = useApi<Session[]>("/sessions?limit=1000");
-  return useMemo(() => {
-    const all = list.data ?? [];
-    const from = new Date(Date.now() - days * 86400000).toISOString();
-    const inWindow = all.filter((s) => s.startedAt >= from);
-    const scoped = inWindow.some((s) => s.id === id);
-    const ids = (scoped ? inWindow : all).map((s) => s.id);
-    const i = ids.indexOf(id);
-    return { newer: i > 0 ? ids[i - 1] : null, older: i >= 0 && i < ids.length - 1 ? ids[i + 1] : null, index: i, total: ids.length, scoped, days };
-  }, [list.data, id, days]);
-}
-
-function Header({ t, nav }: { t: Trace; nav: ReturnType<typeof useNeighbours> }) {
+function Header({ t, nav }: { t: Trace; nav: Nav }) {
   const s = t.session;
   const d = diagnosis(t);
   const navigate = useNavigate();
@@ -406,11 +393,15 @@ function Header({ t, nav }: { t: Trace; nav: ReturnType<typeof useNeighbours> })
   );
 }
 
+type Nav = NonNullable<Trace["nav"]> & { scoped: boolean; days: number };
+/** Not among the newest sessions the server ranks: no position and no arrows. */
+const NO_NAV = { newer: null, older: null, index: -1, total: 0 };
+
 export function SessionPage() {
   const { id = "" } = useParams();
   const { days } = useWindow();
   const t = useApi<Trace>(`/sessions/${encodeURIComponent(id)}?days=${days}`);
-  const nav = useNeighbours(id, days);
+  const nav = useMemo<Nav>(() => ({ ...(t.data?.nav ?? NO_NAV), scoped: t.data?.issueWindow != null, days }), [t.data, days]);
   const navigate = useNavigate();
   const [focus, setFocus] = useState(true);
   const [open, setOpen] = useState<Set<number>>(new Set());

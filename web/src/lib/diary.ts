@@ -3,6 +3,7 @@
  * test/diary.test.ts.
  */
 import type { Session, SessionIssue } from "./api";
+import { DAY, plural } from "./format";
 
 /** A piece of a sentence: plain words, or an issue to highlight (and link to its page). */
 export type Part = { text: string } | { mark: string; key: string; step?: number };
@@ -12,7 +13,7 @@ export function sentence(s: Pick<Session, "toolErrors"> & { issues?: SessionIssu
   const issues = s.issues ?? [];
   const failed = s.toolErrors;
   if (failed === 0 && issues.length === 0) return [{ text: "Ran clean." }];
-  const lead = failed === 0 ? "No call failed, but" : failed === 1 ? "1 failed call" : `${failed.toLocaleString("en-US")} failed calls`;
+  const lead = failed === 0 ? "No call failed, but" : plural(failed, "failed call");
   if (issues.length === 0) return [{ text: `${lead}.` }];
   const shown = issues.slice(0, 2);
   const parts: Part[] = [{ text: failed === 0 ? `${lead} ` : `${lead}: ` }];
@@ -39,7 +40,7 @@ export function activeLabel(ms: number): string {
 /** "Today", "Yesterday", "Mon 23", "Wed 18 Nov" when it is not this month. `day` is a local YYYY-MM-DD. */
 export function relativeDay(day: string, now = new Date(), toDay = localDay): string {
   const today = toDay(now.toISOString());
-  const yesterday = toDay(new Date(now.getTime() - 86400000).toISOString());
+  const yesterday = toDay(new Date(now.getTime() - DAY).toISOString());
   if (day === today) return "Today";
   if (day === yesterday) return "Yesterday";
   const d = new Date(`${day}T12:00:00Z`);

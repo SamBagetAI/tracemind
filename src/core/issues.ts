@@ -10,6 +10,9 @@ const PERMISSION =
 const ERROR_LINE =
   /error|failed|failure|cannot|can't|could not|couldn't|not found|no such|denied|refused|blocked|fatal|exception|invalid|unknown|unexpected|timed? ?out|missing|not allowed|unauthori|forbidden|rejected|doesn't want/i;
 const REPEAT_LIMIT = 3;
+
+/** A call the agent made: a tool or a subagent. What tool-call counts and failed calls count. */
+export const isToolStep = (s: Pick<Step, "kind">) => s.kind === "tool" || s.kind === "subagent";
 const SIG_MAX = 60;
 
 function normalize(line: string): string {
@@ -147,7 +150,7 @@ export function findIssues(steps: Step[], fingerprints: Map<number, string> = ne
   for (const s of steps) {
     if (s.kind === "interrupt") add(finding("interrupted", "user", "A person stopped the agent", s.seq));
 
-    if (s.kind !== "tool" && s.kind !== "subagent") continue;
+    if (!isToolStep(s)) continue;
 
     if (s.isError) {
       const sig = signature(s.output) || "failed";

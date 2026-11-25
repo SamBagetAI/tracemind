@@ -10,7 +10,7 @@ import { Link } from "react-router";
 import { Failed, Loading } from "@/components/shell";
 import { useApi, type Overview, type Session, type Suggestion } from "@/lib/api";
 import { activeLabel, byDay, relativeDay, dollars, localDay, sentence, tokens, worthALook } from "@/lib/diary";
-import { projectName } from "@/lib/format";
+import { DAY, plural, projectName } from "@/lib/format";
 import { useWindow } from "@/lib/window";
 
 const PAGE = 30;
@@ -61,17 +61,16 @@ export function DiaryPage() {
   // Sessions you worked in; routine runs (claude.ai routines) get their own line.
   const o = useApi<Overview>(`/overview?days=${days}&kind=sessions`);
   const routines = useApi<Overview>(`/overview?days=${days}&kind=routines`);
-  // A routine's session also holds the turns where the person answered it: those are replies, not runs.
-  const routineList = useApi<Session[]>(`/sessions?days=${days}&limit=2000&kind=routines`);
-  const replies = (routineList.data ?? []).filter((s) => s.title.includes(": ")).length;
-  const fired = (routineList.data?.length ?? 0) - replies;
+  // Runs a person started are replies to a routine, not runs of it.
+  const replies = routines.data?.replies ?? 0;
+  const fired = (routines.data?.sessions ?? 0) - replies;
   const list = useApi<Session[]>(`/sessions?days=${days}&limit=2000&issues=1&kind=sessions`);
   const fixes = useApi<Suggestion[]>(`/suggestions?days=${days}`);
   const [shown, setShown] = useState(PAGE);
   const [all, setAll] = useState(false);
   // A fix is a change Tracemind can make; an investigation is a prompt for Claude, and is said so.
   const openList = (fixes.data ?? []).filter((s) => s.status === "open");
-  const open = openList.filter((s) => s.action.type === "rule" || s.action.type === "routine").length;
+  const open = openList.filter((s) => s.fixable).length;
   const investigate = openList.length - open;
 
   const error = o.error ?? list.error;
@@ -79,7 +78,7 @@ export function DiaryPage() {
   const { top, rest } = worthALook(list.data ?? []);
   const groups = byDay(rest.slice(0, shown));
   const restClean = rest.filter((s) => s.toolErrors === 0 && (s.issues?.length ?? 0) === 0).length;
-  const from = new Date(Date.now() - days * 86400000);
+  const from = new Date(Date.now() - days * DAY);
   const range = `${from.toLocaleDateString("en-GB", { day: "numeric", month: "short" })} – today`;
 
   return (
@@ -94,15 +93,15 @@ export function DiaryPage() {
           {routines.data && routines.data.sessions > 0 && (
             <p className="-mt-2 mb-3 text-[14px] text-muted-foreground">
               <Link to="/sessions?kind=routines" className="underline-offset-4 hover:text-foreground hover:underline">
-                Your routines ran {fired} {fired === 1 ? "time" : "times"}
-                {replies > 0 && <> and you replied {replies} {replies === 1 ? "time" : "times"}</>}
+                Your routines ran {plural(fired, "time")}
+                {replies > 0 && <> and you replied {plural(replies, "time")}</>}
               </Link>
-              {routines.data.toolErrors > 0 ? `, with ${routines.data.toolErrors} failed ${routines.data.toolErrors === 1 ? "call" : "calls"}.` : ", all clean."}
+              {routines.data.toolErrors > 0 ? `, with ${plural(routines.data.toolErrors, "failed call")}.` : ", all clean."}
             </p>
           )}
           {open + investigate > 0 && (
             <Link to="/fixes" className="mb-8 inline-flex items-center gap-1.5 text-[14px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
-              {[open && (open === 1 ? "1 fix to review" : `${open} fixes to review`), investigate && (investigate === 1 ? "1 issue to investigate" : `${investigate} issues to investigate`)].filter(Boolean).join(" · ")}
+              {[open && plural(open, "fix to review", "fixes to review"), investigate && plural(investigate, "issue to investigate")].filter(Boolean).join(" · ")}
               <ArrowRight className="size-3.5" />
             </Link>
           )}
@@ -120,7 +119,7 @@ export function DiaryPage() {
               className="mt-3 flex w-full items-center gap-1.5 border-t border-border py-3 text-left text-[14px] text-muted-foreground hover:text-foreground"
             >
               <ChevronRight className={`size-3.5 transition-transform ${all ? "rotate-90" : ""}`} />
-              {top.length > 0 ? `${rest.length} other ${rest.length === 1 ? "session" : "sessions"}` : `${rest.length} ${rest.length === 1 ? "session" : "sessions"}`}
+              {top.length > 0 ? plural(rest.length, "other session") : plural(rest.length, "session")}
               {restClean > 0 && <span className="text-faint">({restClean === rest.length ? (rest.length === 1 ? "it ran clean" : "all ran clean") : `${restClean} ran clean`})</span>}
             </button>
           )}

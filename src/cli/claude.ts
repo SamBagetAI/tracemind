@@ -2,6 +2,7 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { DAY } from "../core/time.ts";
 
 export const claudeHome = () => process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
 const projectsDir = () => join(claudeHome(), "projects");
@@ -23,7 +24,7 @@ export function readSessionFiles(transcriptPath: string): { lines: string; subag
 export function listTranscripts(days: number): { id: string; path: string; mtime: number }[] {
   const root = projectsDir();
   if (!existsSync(root)) return [];
-  const since = Date.now() - days * 86400000;
+  const since = Date.now() - days * DAY;
   const out: { id: string; path: string; mtime: number }[] = [];
   for (const proj of readdirSync(root)) {
     const dir = join(root, proj);

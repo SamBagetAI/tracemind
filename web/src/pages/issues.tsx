@@ -8,7 +8,6 @@ import { Link, useSearchParams } from "react-router";
 import { FixMark, Trend } from "@/components/marks";
 import { Empty, Failed, Loading, Page } from "@/components/shell";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useApi, type IssueGroup } from "@/lib/api";
 import { LEVEL_CLASS, dayLabel, plural, sessionsLevel, when } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -32,7 +31,7 @@ function IssueHeader({ days }: { days: number }) {
   );
 }
 
-function IssueRow({ g, days }: { g: IssueGroup; days: number }) {
+function IssueRow({ g }: { g: IssueGroup }) {
   const level = LEVEL_CLASS[sessionsLevel(g.sessions)];
   return (
     <li>
@@ -61,9 +60,10 @@ export function IssuesPage() {
   const status = params.get("status") ?? "open";
   const { days } = useWindow();
   const oneOffs = params.get("all") === "1";
-  const list = useApi<IssueGroup[]>(`/issue-groups?days=${days}${status === "all" ? "" : `&status=${status}`}`);
+  // Loaded once with every status; the Open/Resolved/All toggle filters here, without a refetch.
+  const list = useApi<IssueGroup[]>(`/issue-groups?days=${days}`);
 
-  const groups = list.data ?? [];
+  const groups = (list.data ?? []).filter((g) => (status === "open" || status === "resolved" ? g.status === status : true));
   // An issue gets a row once it has a name a person would use. Errors not named yet sit together at
   // the bottom, as the text the tool printed.
   const named = groups.filter((g) => g.plain);
@@ -114,7 +114,7 @@ export function IssuesPage() {
           {shown.length === 0 ? (
             <Empty>{status === "resolved" ? "Nothing marked resolved in this window." : `No ${oneOffs ? "" : "recurring "}issues in the last ${days} days.`}</Empty>
           ) : (
-            <ol className="divide-y border-b">{shown.map((g) => <IssueRow key={g.id} g={g} days={days} />)}</ol>
+            <ol className="divide-y border-b">{shown.map((g) => <IssueRow key={g.id} g={g} />)}</ol>
           )}
           {unnamed.length > 0 && (
             <Collapsible className="mt-4">

@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parseClaudeSession } from "../src/core/parse-claude.ts";
 import { createApp } from "../src/server/app.ts";
-import { projectRoot, sessionContext } from "../src/server/suggestions.ts";
+import { canApply, projectRoot, sessionContext } from "../src/server/suggestions.ts";
 import { openSqlite } from "../src/store/db.ts";
 import { issueGroups } from "../src/store/insights.ts";
 import { Store } from "../src/store/store.ts";
@@ -105,6 +105,7 @@ describe("suggestions", () => {
     const applied = (await (await app.request("/api/suggestions")).json()).find((s: any) => s.id === sleep.id);
     expect(applied.status).toBe("applied");
     expect(applied.effect.since).toEqual({ sessions: 0, hit: 0 });
+    expect(applied.fixable).toBe(true);
 
     await post(app, `/api/suggestions/${sleep.id}/undo`);
     expect(readFileSync(file, "utf8").trimEnd()).toBe(before.trimEnd());
@@ -280,5 +281,14 @@ describe("one cause, one count", () => {
     const { app } = await setup();
     const groups = await (await app.request("/api/issue-groups?days=30")).json();
     expect(groups.find((g: any) => g.what === "Waited with sleep, which is blocked").fix).toBe("ready");
+  });
+});
+
+describe("what Tracemind can apply", () => {
+  it("applies lines in files and the hook, never a prompt or a tip", () => {
+    expect(canApply({ type: "rule", file: "/x/CLAUDE.md", scope: "global", text: "x" })).toBe(true);
+    expect(canApply({ type: "routine", event: "SessionStart", command: "" })).toBe(true);
+    expect(canApply({ type: "prompt", text: "x" })).toBe(false);
+    expect(canApply({ type: "tip" })).toBe(false);
   });
 });

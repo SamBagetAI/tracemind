@@ -12,13 +12,20 @@
  * `result` line) is one run, and becomes one Tracemind session, so its failures become issues
  * like any other session's. The log is condensed: long inputs and outputs are cut ("… [+N chars]").
  */
-import { findIssues } from "./issues.ts";
+import { findIssues, isToolStep } from "./issues.ts";
 import { activeMs } from "./pricing.ts";
 import { clip, redact } from "./redact.ts";
 import type { Outcome, Session, Step, Trace } from "./types.ts";
 
 /** The agent name every routine run is saved under: how the store tells runs from sessions. */
 export const ROUTINE_AGENT = "claude-code-routine";
+
+/** A time as 17 digits (to the millisecond), for an id. */
+const stamp = (at: string) => at.replace(/[^0-9]/g, "").slice(0, 17);
+/** A routine run's session id: the claude.ai session it ran in, and when the run ended. */
+export const routineRunId = (sessionId: string, endedAt: string) => `routine-${sessionId}-${stamp(endedAt)}`;
+/** The claude.ai session id inside a run's id, or null for any other session. */
+export const routineSessionOf = (id: string): string | null => /^routine-(.+)-\d{17}$/.exec(id)?.[1] ?? null;
 
 type Event = { at: string; kind: string; name: string; text: string };
 
@@ -147,11 +154,11 @@ function runTrace(run: Event[], opts: RoutineOptions): Trace | null {
   const name = fire?.name ?? opts.routine;
   // A turn the person started themselves ("check") is a follow-up in the routine's session.
   const byPerson = steps[0].kind === "prompt";
-  const tools = steps.filter((s) => s.kind === "tool" || s.kind === "subagent");
+  const tools = steps.filter(isToolStep);
   const outcome: Outcome = failed ? "error" : "ok";
   const session: Session = {
     // Keyed by when the run ended: its result line is always there, while a page may cut its start.
-    id: `routine-${opts.sessionId}-${result.at.replace(/[^0-9]/g, "").slice(0, 17)}`,
+    id: routineRunId(opts.sessionId, result.at),
     agent: ROUTINE_AGENT,
     person: opts.person,
     project: `routines/${name}`,

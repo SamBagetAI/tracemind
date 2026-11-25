@@ -110,3 +110,21 @@ export function projectName(path: string): string {
   if (parts.includes("scratch-workspaces")) return "scratch";
   return parts[parts.length - 1] ?? path;
 }
+
+/**
+ * A session's findings, one per cause, at the first step that hit it: what the session's issues
+ * are. `issues` gives each finding's cause (by issue key); a finding without one is its own cause.
+ */
+export function findingsByCause<F extends { key: string }>(findings: F[], issues: Record<string, { cause?: string } | undefined>): F[] {
+  const out = new Map<string, F>();
+  for (const f of findings) {
+    const k = issues[f.key]?.cause ?? f.key;
+    if (!out.has(k)) out.set(k, f);
+  }
+  return [...out.values()];
+}
+
+/** The instruction files a session loaded at its start, each once. */
+export function startFiles<M extends { source: string; ref: string }>(memory: M[]): M[] {
+  return [...new Map(memory.filter((m) => m.source === "instructions").map((m) => [m.ref, m])).values()];
+}

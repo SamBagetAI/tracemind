@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { api, useApi, type Session, type Viewer } from "@/lib/api";
+import { api, type Session } from "@/lib/api";
+import { useViewer } from "@/lib/viewer";
 import { projectName, when } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { WINDOWS, useWindow, type Days } from "@/lib/window";
@@ -60,7 +61,7 @@ function SearchPalette({ open, onOpenChange }: { open: boolean; onOpenChange: (o
 
 export function Shell({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
-  const me = useApi<Viewer>("/me");
+  const me = useViewer();
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const typing = e.target instanceof HTMLElement && (e.target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName));
@@ -137,7 +138,7 @@ export function Shell({ children }: { children: ReactNode }) {
               <span className="hidden lg:inline">Search</span>
               <kbd className="ml-auto hidden rounded border bg-muted px-1 font-mono text-[10px] lg:inline">/</kbd>
             </Button>
-            {me.data?.mode === "server" && (
+            {me?.mode === "server" && (
               <form method="post" action="/api/logout">
                 <Button variant="ghost" size="sm" className="h-7 text-muted-foreground">
                   Sign out
