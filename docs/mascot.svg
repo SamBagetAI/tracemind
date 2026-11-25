@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 180" width="240" height="180" role="img" aria-label="Tracemind's mascot: a slug with a big brain, leaving a trace behind it">
+  <title>Tracemind slug</title>
+  <!-- the trace it leaves: a session strip, with one failure marked -->
+  <path d="M8 160 H150" stroke="#e9e2d3" stroke-width="10" stroke-linecap="round"/>
+  <path d="M22 160 V160 M40 160 V160 M58 160 V160 M96 160 V160 M118 160 V160" stroke="#c9c0ad" stroke-width="10" stroke-linecap="round"/>
+  <path d="M78 160 V160" stroke="#b8322b" stroke-width="10" stroke-linecap="round"/>
+  <!-- body -->
+  <path d="M60 160 C60 132 92 122 132 122 C150 122 160 110 168 96 C176 82 196 80 206 92 C216 104 212 124 200 136 C188 148 178 160 160 160 Z" fill="#f2c979" stroke="#1d1b18" stroke-width="3" stroke-linejoin="round"/>
+  <!-- belly line -->
+  <path d="M72 152 C100 146 140 148 172 150" fill="none" stroke="#d9a94d" stroke-width="3" stroke-linecap="round"/>
+  <!-- big brain on its back, like a shell -->
+  <path d="M84 126 C80 94 102 70 132 72 C160 74 174 98 168 122 C150 128 110 130 84 126 Z" fill="#f6c6c9" stroke="#1d1b18" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M128 74 C124 88 134 96 128 108 C124 116 130 122 128 127" fill="none" stroke="#1d1b18" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M100 94 C108 96 110 104 104 110 M154 94 C146 96 144 104 150 110 M92 114 C98 112 102 118 100 124 M162 112 C156 112 152 118 156 124 M112 82 C116 88 112 94 108 96 M144 82 C140 88 144 94 148 96" fill="none" stroke="#1d1b18" stroke-width="2" stroke-linecap="round"/>
+  <!-- eye stalks -->
+  <path d="M192 90 C190 72 188 60 184 50 M204 94 C206 76 210 64 214 56" fill="none" stroke="#1d1b18" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="183" cy="46" r="8" fill="#fffdf8" stroke="#1d1b18" stroke-width="2.5"/>
+  <circle cx="215" cy="52" r="8" fill="#fffdf8" stroke="#1d1b18" stroke-width="2.5"/>
+  <circle cx="185" cy="47" r="3.5" fill="#1d1b18"/>
+  <circle cx="217" cy="53" r="3.5" fill="#1d1b18"/>
+  <!-- smile -->
+  <path d="M196 112 C200 116 206 116 209 111" fill="none" stroke="#1d1b18" stroke-width="2.5" stroke-linecap="round"/>
+  <!-- cheek -->
+  <ellipse cx="190" cy="108" rx="5" ry="3" fill="#ef9f8a" opacity=".7"/>
+</svg>
