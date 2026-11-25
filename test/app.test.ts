@@ -40,6 +40,20 @@ const json = (body: unknown, headers: Record<string, string> = {}) => ({
   body: JSON.stringify(body),
 });
 
+describe("the local app", () => {
+  it("answers only to a localhost name, so a rebound domain can't read or change anything", async () => {
+    const { app } = await localApp();
+    for (const host of ["http://localhost:4545", "http://127.0.0.1:4545", "http://[::1]:4545"]) {
+      expect((await app.request(`${host}/api/overview`)).status).toBe(200);
+    }
+    expect((await app.request("http://evil.example:4545/api/overview")).status).toBe(403);
+    expect((await app.request("http://evil.example:4545/api/sessions")).status).toBe(403);
+    expect((await app.request("http://evil.example:4545/mcp", json({}, { accept: "application/json, text/event-stream" }))).status).toBe(403);
+    const dismiss = await app.request("http://evil.example:4545/api/issues/x/status", json({ status: "resolved" }, { origin: "http://evil.example:4545" }));
+    expect(dismiss.status).toBe(403);
+  });
+});
+
 describe("numbers the pages show", () => {
   it("counts the window the same way everywhere and says how it compares with the period before", async () => {
     const { app } = await localApp();
