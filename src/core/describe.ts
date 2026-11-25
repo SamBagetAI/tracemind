@@ -15,19 +15,39 @@ export const KIND: Record<IssueKind, string> = {
 };
 
 /** Known error signatures, said the way a person would. Order matters: the first match wins. */
+/**
+ * Causes other code acts on by name (fixes, the brief, advice). Named here once, so rewording one
+ * cannot quietly switch those off.
+ */
+export const CAUSE = {
+  classifier: "Refused by the auto-mode classifier",
+  sleep: "Waited with sleep, which is blocked",
+  exitCode: "Exited with an error code",
+  unread: "Edited a file before reading it",
+  changedSinceRead: "Edited a file that changed since it was read",
+  textNotFound: "Text to replace was not in the file",
+  notSignedIn: "Not signed in to the service",
+  safetyCheck: "Refused by a built-in safety check",
+  stopped: "Stopped by a person",
+  repeated: "Same call repeated 3+ times in a row",
+} as const;
+
+/** How a sentence names an error that has no plain name yet. */
+export const UNNAMED = "an error without a name yet";
+
 const PLAIN: [RegExp, string][] = [
-  [/denied by the claude code aut|auto mode classifier/i, "Refused by the auto-mode classifier"],
-  [/blocked: sleep/i, "Waited with sleep, which is blocked"],
-  [/^exit code #$/i, "Exited with an error code"],
-  [/file has not been read yet/i, "Edited a file before reading it"],
-  [/modified since read/i, "Edited a file that changed since it was read"],
-  [/string to replace not found/i, "Text to replace was not in the file"],
+  [/denied by the claude code aut|auto mode classifier/i, CAUSE.classifier],
+  [/blocked: sleep/i, CAUSE.sleep],
+  [/^exit code #$/i, CAUSE.exitCode],
+  [/file has not been read yet/i, CAUSE.unread],
+  [/modified since read/i, CAUSE.changedSinceRead],
+  [/string to replace not found/i, CAUSE.textNotFound],
   [/inputvalidationerror/i, "Called with input it does not accept"],
   [/hook error/i, "Blocked by a hook"],
   [/doesn't want to proceed|user rejected|rejected by (?:the )?user/i, "Rejected by the person"],
   [/no such tool available/i, "Called a tool that is not available"],
-  [/unauthori[sz]ed|not authenticated|please run <…> again/i, "Not signed in to the service"],
-  [/denied by a built-in|built-in claude code safety/i, "Refused by a built-in safety check"],
+  [/unauthori[sz]ed|not authenticated|please run <…> again/i, CAUSE.notSignedIn],
+  [/denied by a built-in|built-in claude code safety/i, CAUSE.safetyCheck],
   [/no matches found/i, "Shell pattern matched no files"],
   [/neondberror|sqlstate|(?:column|relation|table|role|database|schema|function) [^\n]{0,60}does not exist/i, "Database query failed"],
   [/\(eval\):#?\d*:? ?=+ not found/i, "zsh read == as a command"],
@@ -62,11 +82,11 @@ export type Described = { tool: string; what: string; raw: string; plain: boolea
 
 /** Splits a stored title ("Bash git failed: exit code #") into the tool and what went wrong. */
 export function describeIssue(issue: { kind: IssueKind; title: string }): Described {
-  if (issue.kind === "interrupted") return { tool: "", what: "Stopped by a person", raw: issue.title, plain: true };
+  if (issue.kind === "interrupted") return { tool: "", what: CAUSE.stopped, raw: issue.title, plain: true };
   const m = /^(.*?) (?:failed|was refused|was blocked|was rejected|called with the same input .*)(?:: (.*))?$/.exec(issue.title);
   const tool = m?.[1] ?? "";
   const sig = m?.[2] ?? issue.title;
-  if (issue.kind === "step_repetition") return { tool, what: "Same call repeated 3+ times in a row", raw: issue.title, plain: true };
+  if (issue.kind === "step_repetition") return { tool, what: CAUSE.repeated, raw: issue.title, plain: true };
   for (const [re, text] of PLAIN) if (re.test(sig)) return { tool, what: text, raw: sig, plain: true };
   // Not a known error: the error's own first words, cleaned up, and marked as such.
   const cleaned = sig.replace(/<…>/g, "…").replace(/<id>|<path>/g, "…").replace(/#/g, "N").replace(/\s+…$/, "…");
@@ -76,7 +96,7 @@ export function describeIssue(issue: { kind: IssueKind; title: string }): Descri
 
 /**
  * The cause an issue belongs to. A named cause is one cause whatever kind it was filed under
- * ("Refused by the auto-mode classifier" can come back as a refusal or as a tool's error); an
+ * (CAUSE.classifier can come back as a refusal or as a tool's error); an
  * unnamed one keeps its kind. Pass `d` when the issue was already described, to skip doing it twice.
  */
 export function causeKey(issue: { kind: IssueKind; title: string }, d = describeIssue(issue)): string {
@@ -127,4 +147,30 @@ export function findingsByCause<F extends { key: string }>(findings: F[], issues
 /** The instruction files a session loaded at its start, each once. */
 export function startFiles<M extends { source: string; ref: string }>(memory: M[]): M[] {
   return [...new Map(memory.filter((m) => m.source === "instructions").map((m) => [m.ref, m])).values()];
+}
+
+export type Variant = { message: string; tools: string[]; commands: number; sessions: number };
+
+/**
+ * A cause's variants grouped by what they said, so the same error from cat and from node is one
+ * line naming both tools: grouped by the normalized signature, shown as one of them actually said
+ * it (`messages`, by issue key). Most commands first; sessions are not added up across variants,
+ * which would count a session twice.
+ */
+export function variantsByMessage(
+  issues: { key: string; kind: IssueKind; title: string; tool: string; windowSessions?: number }[],
+  messages: Record<string, string> = {},
+): Variant[] {
+  const by = new Map<string, { message: string; tools: Set<string>; commands: number; sessions: number }>();
+  for (const i of issues) {
+    const sig = describeIssue(i).raw;
+    const e = by.get(sig) ?? { message: messages[i.key] || sig, tools: new Set<string>(), commands: 0, sessions: 0 };
+    e.tools.add(toolLabel(i.tool) || i.tool);
+    e.commands++;
+    e.sessions = Math.max(e.sessions, i.windowSessions ?? 0);
+    by.set(sig, e);
+  }
+  return [...by.values()]
+    .map((e) => ({ ...e, tools: [...e.tools] }))
+    .sort((a, b) => b.commands - a.commands || b.sessions - a.sessions);
 }

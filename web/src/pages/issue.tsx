@@ -18,7 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { usePost, useApi, type CauseDetail } from "@/lib/api";
-import { LEVEL_CLASS, dayLabel, describeIssue, fullDate, num, plural, projectName, sessionsLevel, toolLabel, when } from "@/lib/format";
+import { LEVEL_CLASS, dayLabel, fullDate, variantsByMessage, num, plural, projectName, sessionsLevel, when } from "@/lib/format";
 import { useWindow } from "@/lib/window";
 
 function Resolve({ k, status, variants, onDone }: { k: string; status: "open" | "resolved"; variants: number; onDone: () => void }) {
@@ -62,18 +62,7 @@ function Resolve({ k, status, variants, onDone }: { k: string; status: "open" | 
  */
 function Variants({ issues, messages }: { issues: CauseDetail["cause"]["issues"]; messages: Record<string, string> }) {
   const [all, setAll] = useState(false);
-  const byMessage = new Map<string, { message: string; tools: Set<string>; variants: number; sessions: number }>();
-  for (const i of issues) {
-    // Grouped by the normalized signature, shown as one of them actually said it.
-    const msg = describeIssue(i).raw;
-    const e = byMessage.get(msg) ?? { message: messages[i.key] || msg, tools: new Set<string>(), variants: 0, sessions: 0 };
-    e.tools.add(toolLabel(i.tool) || i.tool);
-    e.variants++;
-    e.sessions = Math.max(e.sessions, i.windowSessions);
-    byMessage.set(msg, e);
-  }
-  // Ordered by how many commands said it; adding sessions across variants would count a session twice.
-  const list = [...byMessage.values()].sort((a, b) => b.variants - a.variants || b.sessions - a.sessions);
+  const list = variantsByMessage(issues, messages);
   const shown = all ? list : list.slice(0, 5);
   return (
     <section className="mb-10">
@@ -83,7 +72,7 @@ function Variants({ issues, messages }: { issues: CauseDetail["cause"]["issues"]
           <li key={v.message} className="px-1 py-2 sm:px-2">
             <span className="block font-mono text-[12px] break-words text-foreground/90" title={v.message}>{errorDetail(v.message)}</span>
             <span className="mt-0.5 block truncate text-[12px] text-faint">
-              <span className="font-mono text-[11px]">{[...v.tools].slice(0, 6).join(", ")}{v.tools.size > 6 ? ` +${v.tools.size - 6}` : ""}</span>
+              <span className="font-mono text-[11px]">{v.tools.slice(0, 6).join(", ")}{v.tools.length > 6 ? ` +${v.tools.length - 6}` : ""}</span>
             </span>
           </li>
         ))}

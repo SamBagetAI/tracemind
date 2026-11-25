@@ -9,7 +9,7 @@
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { describeIssue, findingsByCause, startFiles } from "../core/describe.ts";
+import { findingsByCause, startFiles, variantsByMessage } from "../core/describe.ts";
 import { isToolStep } from "../core/issues.ts";
 import { parseRoutineRuns, routineSessionOf } from "../core/parse-routine.ts";
 import type { Finding, MemoryEvent, Session, Step } from "../core/types.ts";
@@ -146,14 +146,6 @@ export function createMcpServer(call: ApiCall, opts: { canApply: boolean }): Mcp
     async ({ issue, days }) => {
       const key = await issueKey(call, issue, days);
       const d = await call(`/cause/${encodeURIComponent(key)}?days=${days}`);
-      const messages = new Map<string, { message: string; commands: number; tools: Set<string> }>();
-      for (const i of d.cause.issues as { kind: string; title: string; tool: string }[]) {
-        const msg = describeIssue(i as never).raw;
-        const e = messages.get(msg) ?? { message: msg, commands: 0, tools: new Set<string>() };
-        e.commands++;
-        e.tools.add(i.tool);
-        messages.set(msg, e);
-      }
       return text({
         issue: d.cause.plain ? d.cause.what : "Error without a name yet",
         kind: d.cause.kindLabel,
@@ -163,7 +155,8 @@ export function createMcpServer(call: ApiCall, opts: { canApply: boolean }): Mcp
         firstSeen: d.cause.firstSeen,
         lastSeen: d.cause.lastSeen,
         latestError: clip(d.example, 1500),
-        whatItSaid: [...messages.values()].sort((a, b) => b.commands - a.commands).slice(0, 8).map((m) => ({ message: m.message, commands: m.commands, tools: [...m.tools].slice(0, 6) })),
+        // The same list the issue page shows under "What it said".
+        whatItSaid: variantsByMessage(d.cause.issues, d.messages).slice(0, 8).map((m) => ({ message: m.message, commands: m.commands, tools: m.tools.slice(0, 6) })),
         sessions: (d.sessions as { id: string; title: string; project: string; endedAt: string; seq: number }[]).slice(0, 10).map((s) => ({ id: s.id, title: s.title, project: s.project, lastActive: s.endedAt, step: s.seq })),
         fix: d.suggestion ? fixRow(d.suggestion) : null,
       });

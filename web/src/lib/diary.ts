@@ -3,7 +3,7 @@
  * test/diary.test.ts.
  */
 import type { Session, SessionIssue } from "./api";
-import { DAY, plural } from "./format";
+import { DAY, UNNAMED, plural } from "./format";
 
 /** A piece of a sentence: plain words, or an issue to highlight (and link to its page). */
 export type Part = { text: string } | { mark: string; key: string; step?: number };
@@ -20,7 +20,7 @@ export function sentence(s: Pick<Session, "toolErrors"> & { issues?: SessionIssu
   shown.forEach((i, k) => {
     if (k > 0) parts.push({ text: k === shown.length - 1 && issues.length <= 2 ? " and " : ", " });
     // Only a named issue gets the highlighter; an error without a name is said plainly.
-    parts.push(i.named === false ? { text: "an error without a name yet" } : { mark: i.what, key: i.key, step: i.seq });
+    parts.push(i.named === false ? { text: UNNAMED } : { mark: i.what, key: i.key, step: i.seq });
   });
   const more = issues.length - shown.length;
   parts.push({ text: more > 0 ? ` and ${more} more.` : "." });
@@ -64,13 +64,6 @@ export function byDay<T extends Pick<Session, "endedAt">>(sessions: T[], day = (
     days.set(d, [...(days.get(d) ?? []), s]);
   }
   return [...days.entries()].map(([day, list]) => ({ day, sessions: list }));
-}
-
-/** "1.4M", "880k", "950". */
-export function tokens(n: number): string {
-  if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M`;
-  if (n >= 1e3) return `${Math.round(n / 1e3)}k`;
-  return String(n);
 }
 
 /** "$152", "$0.79". */

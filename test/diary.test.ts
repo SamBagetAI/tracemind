@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { activeMs, costOf } from "../src/core/pricing.ts";
-import { activeLabel, byDay, relativeDay, dollars, sentence, tokens, worthALook } from "../web/src/lib/diary";
+import { activeLabel, byDay, relativeDay, dollars, sentence, worthALook } from "../web/src/lib/diary";
+import { compact } from "../web/src/lib/format";
 
 describe("diary sentences", () => {
   it("says a clean session ran clean", () => {
@@ -31,8 +32,10 @@ describe("diary sentences", () => {
     expect(relativeDay("2026-11-24", now, utc)).toBe("Yesterday");
     expect(relativeDay("2026-11-23", now, utc)).toBe("Mon 23");
     expect(relativeDay("2026-10-30", now, utc)).toBe("Fri 30 Oct");
-    expect(tokens(1_450_830)).toBe("1.5M");
-    expect(tokens(21_441)).toBe("21k");
+    // Tokens are shown the same way on every page: 1,500 is "1.5k" on the Diary and a session alike.
+    expect(compact(1_450_830)).toBe("1.5M");
+    expect(compact(21_441)).toBe("21k");
+    expect(compact(1_500)).toBe("1.5k");
     expect(dollars(152.03)).toBe("$152");
     expect(dollars(0.79)).toBe("$0.79");
   });

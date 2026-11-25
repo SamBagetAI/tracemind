@@ -3,7 +3,7 @@
  * daily history, what failing sessions knew compared with the others, where failures sit in each
  * session, and the raw facts suggestions are made from.
  */
-import { causeKey, describeIssue, KIND, topTools, type IssueKind } from "../core/describe.ts";
+import { causeKey, describeIssue, KIND, topTools, UNNAMED, type IssueKind } from "../core/describe.ts";
 import { errorLine } from "../core/issues.ts";
 import { DAY, daysAgo } from "../core/time.ts";
 import type { Row } from "./db.ts";
@@ -237,7 +237,7 @@ export async function sessionIssues(store: Store, ws: string, ids: string[]) {
   for (const r of rows) {
     const d = describeIssue({ kind: r.kind as never, title: String(r.title) });
     const list = (out[String(r.session_id)] ??= []);
-    const what = d.plain ? d.what : "an error without a name yet";
+    const what = d.plain ? d.what : UNNAMED;
     if (!list.some((x) => x.what === what)) list.push({ what, seq: n(r.seq), key: String(r.key), named: d.plain });
   }
   return out;
