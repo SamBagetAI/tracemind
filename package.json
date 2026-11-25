@@ -18,6 +18,7 @@
     "build": "tsc -p tsconfig.json && vite build",
     "dev": "node --experimental-strip-types src/cli/index.ts",
     "dev:web": "vite",
+    "record": "pnpm build && node scripts/record.mjs",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p web/tsconfig.json"
   },
@@ -41,7 +42,10 @@
     "class-variance-authority": "^0.7.1",
     "cmdk": "^1.1.1",
     "cn": "^0.5.2",
+    "gifenc": "^1.0.3",
     "lucide-react": "^1.79.0",
+    "playwright-core": "^1.65.1",
+    "pngjs": "^7.0.0",
     "radix-ui": "^1.8.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
