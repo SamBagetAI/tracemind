@@ -96,8 +96,43 @@ describe("routine runs over MCP", () => {
     expect([await kinds("sessions"), await kinds("routines")]).toEqual([1, 1]);
     const runs = await (await app.request("/api/sessions?limit=2000&kind=routines")).json();
     expect(runs.map((x: { title: string }) => x.title)).toEqual(["Call notes"]);
+    // Tools can be read for local sessions or routine runs alone.
+    const toolsOf = async (k: string) => ((await (await app.request(`/api/tools?days=3650&kind=${k}`)).json()) as { name: string }[]).map((t) => t.name);
+    expect(await toolsOf("routines")).toEqual(["mcp__remote__delete_trigger"]);
+    expect(await toolsOf("sessions")).not.toContain("mcp__remote__delete_trigger");
     const status = await read(client, "routine_sync_status");
     expect(status.routineSessions).toEqual([{ sessionId: "session_X", runs: 1, newestRunEnded: "2026-11-24T16:34:23.698Z" }]);
+  });
+});
+
+describe("routine run ids", () => {
+  it("are renamed from start time to end time on upgrade, with their steps", async () => {
+    const store = new Store(await openSqlite(":memory:"));
+    await store.migrate();
+    const { parseRoutineRuns } = await import("../src/core/parse-routine.ts");
+    const [run] = parseRoutineRuns("[2026-11-24T16:00:00.000Z] env[info]: x\n[2026-11-24T16:00:01.000Z] tool_use Bash: {}\n[2026-11-24T16:00:02.000Z] tool_result: ok\n[2026-11-24T16:05:00.000Z] result: success — ok", { routine: "R", sessionId: "s1", person: "Ada" });
+    const old = { ...run, session: { ...run.session, id: "routine-s1-20261124160000000" } };
+    await store.saveTrace("local", old);
+    await store.migrate();
+    const ids = (await store.sessions("local", {})).map((s) => s.id);
+    expect(ids).toEqual(["routine-s1-20261124160500000"]);
+    expect((await store.trace("local", ids[0]))?.steps.map((s) => s.name)).toEqual(["Bash"]);
+  });
+
+  it("keep both runs when one run ends at the instant the next one starts", async () => {
+    const store = new Store(await openSqlite(":memory:"));
+    await store.migrate();
+    const { parseRoutineRuns } = await import("../src/core/parse-routine.ts");
+    const log = [
+      "[2026-11-24T16:00:00.000Z] env[info]: x", "[2026-11-24T16:00:01.000Z] tool_use Bash: {}", "[2026-11-24T16:00:02.000Z] tool_result: ok", "[2026-11-24T16:05:00.000Z] result: success — ok",
+      "[2026-11-24T16:05:00.000Z] user: next", "[2026-11-24T16:05:01.000Z] assistant: done", "[2026-11-24T16:06:00.000Z] result: success — done",
+    ].join("\n");
+    const [a, b] = parseRoutineRuns(log, { routine: "R", sessionId: "s1", person: "Ada" });
+    // Saved the old way: each keyed by its start. The first run's end is the second run's start.
+    await store.saveTrace("local", { ...a, session: { ...a.session, id: "routine-s1-20261124160000000" } });
+    await store.saveTrace("local", { ...b, session: { ...b.session, id: "routine-s1-20261124160500000" } });
+    await store.migrate();
+    expect((await store.sessions("local", {})).map((s) => s.id).sort()).toEqual(["routine-s1-20261124160500000", "routine-s1-20261124160600000"]);
   });
 });
 

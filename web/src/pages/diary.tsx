@@ -25,7 +25,7 @@ function Stats({ o, days }: { o: Overview; days: number }) {
       <Link to="/sessions" className="hover:underline">{n(o.sessions)} {o.sessions === 1 ? "session" : "sessions"}</Link>, {n(activeLabel(o.activeMs))} of active time with Claude.{" "}
       <Link to="/sessions?show=clean" className="hover:underline">{n(clean)} ran clean</Link>
       {p.sessions > 0 && <span className="text-muted-foreground"> ({p.sessions - p.withIssues} of {p.sessions} the {days} days before)</span>}.{" "}
-      <Link to="/tools" className="hover:underline">{n(o.toolErrors.toLocaleString("en-US"))} failed calls</Link>, {n(tokens(o.outputTokens))} tokens out
+      <Link to="/tools?kind=sessions" className="hover:underline">{n(o.toolErrors.toLocaleString("en-US"))} failed calls</Link>, {n(tokens(o.outputTokens))} tokens out
       {o.costUsd > 0 && <span className="text-muted-foreground">, about {dollars(o.costUsd)} at API prices</span>}.
     </p>
   );
@@ -61,6 +61,10 @@ export function DiaryPage() {
   // Sessions you worked in; routine runs (claude.ai routines) get their own line.
   const o = useApi<Overview>(`/overview?days=${days}&kind=sessions`);
   const routines = useApi<Overview>(`/overview?days=${days}&kind=routines`);
+  // A routine's session also holds the turns where the person answered it: those are replies, not runs.
+  const routineList = useApi<Session[]>(`/sessions?days=${days}&limit=2000&kind=routines`);
+  const replies = (routineList.data ?? []).filter((s) => s.title.includes(": ")).length;
+  const fired = (routineList.data?.length ?? 0) - replies;
   const list = useApi<Session[]>(`/sessions?days=${days}&limit=2000&issues=1&kind=sessions`);
   const fixes = useApi<Suggestion[]>(`/suggestions?days=${days}`);
   const [shown, setShown] = useState(PAGE);
@@ -90,7 +94,8 @@ export function DiaryPage() {
           {routines.data && routines.data.sessions > 0 && (
             <p className="-mt-2 mb-3 text-[14px] text-muted-foreground">
               <Link to="/sessions?kind=routines" className="underline-offset-4 hover:text-foreground hover:underline">
-                Your routines ran {routines.data.sessions} {routines.data.sessions === 1 ? "time" : "times"}
+                Your routines ran {fired} {fired === 1 ? "time" : "times"}
+                {replies > 0 && <> and you replied {replies} {replies === 1 ? "time" : "times"}</>}
               </Link>
               {routines.data.toolErrors > 0 ? `, with ${routines.data.toolErrors} failed ${routines.data.toolErrors === 1 ? "call" : "calls"}.` : ", all clean."}
             </p>

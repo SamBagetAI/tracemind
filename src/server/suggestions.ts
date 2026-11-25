@@ -53,12 +53,16 @@ export type Suggestion = {
   checks?: BriefChecks | null;
 };
 
+/** SQL for "not a routine run" (src/core/parse-routine.ts names their agent). */
+const LOCAL = "'claude-code-routine'";
+
 export type BriefChecks = { sessions: number; given: number; empty: number; failed: number; unrecorded: number };
 
 /** Sessions that started since `at`, by what the brief did in them (read from their transcripts). */
 export async function briefChecks(store: Store, ws: string, at: string): Promise<BriefChecks> {
   const rows = await store.db.all<Row>(
-    "SELECT brief, CAST(COUNT(*) AS INTEGER) AS c FROM sessions WHERE workspace = ? AND started_at >= ? GROUP BY brief",
+    // Routine runs run in the cloud and never run this machine's hooks: they are not missed briefs.
+    `SELECT brief, CAST(COUNT(*) AS INTEGER) AS c FROM sessions WHERE workspace = ? AND started_at >= ? AND agent <> ${LOCAL} GROUP BY brief`,
     [ws, at],
   );
   const by = (k: string | null) => Number(rows.find((r) => (r.brief ?? null) === k)?.c ?? 0);
@@ -101,17 +105,18 @@ async function examplesFor(store: Store, ws: string, keys: string[], limit = 3) 
 /** Everything the rules below look at, in one place. */
 async function facts(store: Store, ws: string, days: number) {
   const since = new Date(Date.now() - days * DAY).toISOString();
-  const groups = await issueGroups(store, ws, since);
-  const sessions = await store.db.all<Row>("SELECT id, project, title FROM sessions WHERE workspace = ? AND started_at >= ?", [ws, since]);
+  // Local sessions only: routine runs never read this machine's Claude setup, so a fix to it can't help them.
+  const groups = await issueGroups(store, ws, since, undefined, undefined, true);
+  const sessions = await store.db.all<Row>(`SELECT id, project, title FROM sessions WHERE workspace = ? AND started_at >= ? AND agent <> ${LOCAL}`, [ws, since]);
   const prodReads = await store.db.all<Row>(
     `SELECT s.project, st.session_id, st.seq, st.input, s.title FROM steps st JOIN sessions s ON s.workspace = st.workspace AND s.id = st.session_id
-      WHERE st.workspace = ? AND s.started_at >= ? AND st.is_error = 1
+      WHERE st.workspace = ? AND s.started_at >= ? AND s.agent <> ${LOCAL} AND st.is_error = 1
         AND (st.output LIKE '%[Production Reads]%' OR st.output LIKE '%[Credential Materialization]%' OR st.output LIKE '%[PII Data Handling]%')`,
     [ws, since],
   );
   const compactions = await store.db.all<Row>(
     `SELECT s.project, COUNT(DISTINCT st.session_id) AS sessions FROM steps st JOIN sessions s ON s.workspace = st.workspace AND s.id = st.session_id
-      WHERE st.workspace = ? AND s.started_at >= ? AND st.kind = 'compact' GROUP BY s.project`,
+      WHERE st.workspace = ? AND s.started_at >= ? AND s.agent <> ${LOCAL} AND st.kind = 'compact' GROUP BY s.project`,
     [ws, since],
   );
   const [interrupts] = await store.db.all<Row>(
@@ -353,14 +358,14 @@ export async function buildSuggestions(store: Store, ws: string, local: boolean,
 /** Sessions that hit any of the causes, in the 30 days before `at` and since. */
 export async function effect(store: Store, ws: string, causes: string[], at: string) {
   const window = async (from: string, to: string) => {
-    const [total] = await store.db.all<Row>("SELECT CAST(COUNT(*) AS INTEGER) AS c FROM sessions WHERE workspace = ? AND started_at >= ? AND started_at < ?", [ws, from, to]);
+    const [total] = await store.db.all<Row>(`SELECT CAST(COUNT(*) AS INTEGER) AS c FROM sessions WHERE workspace = ? AND started_at >= ? AND started_at < ? AND agent <> ${LOCAL}`, [ws, from, to]);
     if (causes.length === 0) return { sessions: Number(total?.c ?? 0), hit: 0 };
-    const groups = await issueGroups(store, ws, from);
+    const groups = await issueGroups(store, ws, from, undefined, undefined, true);
     const keys = groups.filter((g) => causes.includes(g.id)).flatMap((g) => g.issues.map((i) => i.key));
     if (keys.length === 0) return { sessions: Number(total?.c ?? 0), hit: 0 };
     const [hit] = await store.db.all<Row>(
       `SELECT CAST(COUNT(DISTINCT f.session_id) AS INTEGER) AS c FROM findings f JOIN sessions s ON s.workspace = f.workspace AND s.id = f.session_id
-        WHERE f.workspace = ? AND s.started_at >= ? AND s.started_at < ? AND f.key IN (${keys.map(() => "?").join(", ")})`,
+        WHERE f.workspace = ? AND s.started_at >= ? AND s.started_at < ? AND s.agent <> ${LOCAL} AND f.key IN (${keys.map(() => "?").join(", ")})`,
       [ws, from, to, ...keys],
     );
     return { sessions: Number(total?.c ?? 0), hit: Number(hit?.c ?? 0) };

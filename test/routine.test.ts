@@ -76,4 +76,38 @@ describe("routine runs", () => {
     const b = parseRoutineRuns([LOG.split("\n").slice(0, 14).join("\n"), LOG], opts).map((r) => r.session.id);
     expect(b).toEqual(a);
   });
+
+  it("leaves out a run whose start is cut off by a page, and keys runs by when they ended", () => {
+    const cut = LOG.split("\n").slice(3).join("\n"); // the first run without its start
+    const runs = parseRoutineRuns(cut, opts);
+    expect(runs.map((r) => r.session.title)).toEqual(["Campaign replies check-in", "Campaign replies check-in: what did you do today?"]);
+    const whole = parseRoutineRuns(LOG, opts);
+    expect(whole[1].session.id).toBe(runs[0].session.id);
+    expect(whole[0].session.id).toBe("routine-session_01ABC-20261124163423698");
+  });
+
+  it("gives a result to the waiting call it names, when calls ran together", () => {
+    const log = `[2026-11-25T07:00:00.000000Z] env[info]: Allocating sandbox
+[2026-11-25T07:00:01.000000Z] tool_use mcp__chrome__navigate: {"tabId":1031310525,"url":"https://a.example"}
+[2026-11-25T07:00:01.100000Z] tool_use mcp__chrome__navigate: {"tabId":1031310578,"url":"https://b.example"}
+[2026-11-25T07:00:02.000000Z] tool_result ERROR: Tab 1031310578 is not in Claude's tab group for this session.
+[2026-11-25T07:00:03.000000Z] tool_result: Navigated to https://a.example
+[2026-11-25T07:00:04.000000Z] result: success is_error=false turns=1 duration=4s — done`;
+    const [run] = parseRoutineRuns(log, opts);
+    const [a, b] = run.steps.filter((s) => s.kind === "tool");
+    expect(a.isError).toBe(false);
+    expect(b.isError).toBe(true);
+    expect(b.output).toContain("1031310578");
+  });
+
+  it("keeps an event's text that runs over several lines", () => {
+    const log = `[2026-11-25T07:00:00.000000Z] env[info]: Allocating sandbox
+[2026-11-25T07:00:01.000000Z] tool_use Bash: {"command":"pnpm test"}
+[2026-11-25T07:00:02.000000Z] tool_result ERROR: Exit code 1
+FAIL src/app.test.ts
+Error: expected 2 to be 3
+[2026-11-25T07:00:04.000000Z] result: success is_error=false turns=1 duration=4s — done`;
+    const [run] = parseRoutineRuns(log, opts);
+    expect(run.steps[0].output).toContain("expected 2 to be 3");
+  });
 });

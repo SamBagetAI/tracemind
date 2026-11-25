@@ -39,9 +39,10 @@ export function days(since: string, until = Date.now()): string[] {
 }
 
 /** Findings in the window: which session hit which issue, and on which day. */
-async function findingRows(store: Store, ws: string, since: string, keys?: string[], until?: string) {
+async function findingRows(store: Store, ws: string, since: string, keys?: string[], until?: string, localOnly = false) {
   const params: unknown[] = [ws, since];
   let only = until ? (params.push(until), " AND s.started_at < ?") : "";
+  if (localOnly) only += " AND s.agent <> 'claude-code-routine'";
   if (keys) {
     if (keys.length === 0) return [];
     only += ` AND f.key IN (${keys.map(() => "?").join(", ")})`;
@@ -56,9 +57,13 @@ async function findingRows(store: Store, ws: string, since: string, keys?: strin
 }
 
 /** Issues grouped by cause, with counts over the window. Groups with no session in the window are left out. */
-export async function issueGroups(store: Store, ws: string, since: string, status?: "open" | "resolved", until?: string): Promise<IssueGroup[]> {
+/**
+ * `localOnly` leaves out routine runs: they run in a cloud sandbox and never read this machine's
+ * Claude setup, so fixes to that setup are suggested and measured on local sessions only.
+ */
+export async function issueGroups(store: Store, ws: string, since: string, status?: "open" | "resolved", until?: string, localOnly = false): Promise<IssueGroup[]> {
   const issues = await store.issues(ws);
-  const rows = await findingRows(store, ws, since, undefined, until);
+  const rows = await findingRows(store, ws, since, undefined, until, localOnly);
   // Per-day counts cover at most the last year, whatever the window (an all-time query starts in year 0).
   const yearAgo = new Date(Date.now() - 365 * DAY).toISOString();
   const dayList = days(since < yearAgo ? yearAgo : since);

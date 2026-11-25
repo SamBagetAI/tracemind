@@ -313,7 +313,10 @@ export function createApp(opts: AppOptions) {
     return c.json((await store.issue(v.workspace, key))!.issue);
   });
 
-  api.get("/tools", async (c) => c.json(await store.tools(c.get("viewer").workspace, since(windowDays(c)))));
+  api.get("/tools", async (c) => {
+    const k = c.req.query("kind");
+    return c.json(await store.tools(c.get("viewer").workspace, since(windowDays(c)), k === "sessions" || k === "routines" ? k : undefined));
+  });
   api.get("/memory", async (c) => c.json(await store.memory(c.get("viewer").workspace, since(windowDays(c)))));
 
   api.get("/suggestions", async (c) => c.json(await suggestionsFor(c.get("viewer").workspace, windowDays(c))));

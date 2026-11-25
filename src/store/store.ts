@@ -119,6 +119,39 @@ export class Store {
         // Already there.
       }
     }
+    // Routine runs were first keyed by when they started; they are keyed by when they ended now
+    // (src/core/parse-routine.ts), so the same run imported again replaces itself. One run's end
+    // can be the next run's start, so every run moves to a temporary id first, then to its new id;
+    // only two rows that end up with the same id (the same run imported twice) are merged.
+    const runs = await this.db.all<Row>("SELECT workspace, id, ended_at, step_count FROM sessions WHERE agent = 'claude-code-routine' ORDER BY step_count DESC");
+    const moves = runs
+      .map((r) => {
+        const m = /^(routine-.+)-\d{17}$/.exec(String(r.id));
+        return m ? { ws: String(r.workspace), id: String(r.id), next: `${m[1]}-${String(r.ended_at).replace(/[^0-9]/g, "").slice(0, 17)}` } : null;
+      })
+      .filter((x): x is { ws: string; id: string; next: string } => !!x && x.next !== x.id);
+    if (moves.length > 0) {
+      await this.db.transaction(async (db) => {
+        const rename = async (ws: string, from: string, to: string) => {
+          for (const t of ["steps", "memory", "findings"]) await db.run(`UPDATE ${t} SET session_id = ? WHERE workspace = ? AND session_id = ?`, [to, ws, from]);
+          await db.run("UPDATE sessions SET id = ? WHERE workspace = ? AND id = ?", [to, ws, from]);
+        };
+        const drop = async (ws: string, id: string) => {
+          for (const t of ["steps", "memory", "findings"]) await db.run(`DELETE FROM ${t} WHERE workspace = ? AND session_id = ?`, [ws, id]);
+          await db.run("DELETE FROM sessions WHERE workspace = ? AND id = ?", [ws, id]);
+        };
+        for (const m of moves) await rename(m.ws, m.id, `moving-${m.id}`);
+        const taken = new Set((await db.all<Row>("SELECT workspace, id FROM sessions")).map((r) => `${r.workspace} ${r.id}`));
+        // Runs come with the most steps first, so a duplicate keeps its fuller copy.
+        for (const m of moves) {
+          if (taken.has(`${m.ws} ${m.next}`)) await drop(m.ws, `moving-${m.id}`);
+          else {
+            await rename(m.ws, `moving-${m.id}`, m.next);
+            taken.add(`${m.ws} ${m.next}`);
+          }
+        }
+      });
+    }
     // Repair first/last seen from the sessions (older versions kept the first-saved session's date).
     await this.db.run(
       `UPDATE issues SET
@@ -396,8 +429,8 @@ export class Store {
    * sessions the Overview and the Sessions list count, so the rows add up to their totals.
    * Typical is the median, slow the 95th percentile, of the calls whose run time is known.
    */
-  async tools(ws: string, since: string) {
-    const inWindow = "SELECT id FROM sessions WHERE workspace = ? AND started_at >= ?";
+  async tools(ws: string, since: string, kind?: SessionKind) {
+    const inWindow = `SELECT id FROM sessions WHERE workspace = ? AND started_at >= ?${kind === "routines" ? ` AND agent = '${ROUTINE_AGENT}'` : kind === "sessions" ? ` AND agent <> '${ROUTINE_AGENT}'` : ""}`;
     const rows = await this.db.all<Row>(
       `SELECT name, CAST(COUNT(*) AS INTEGER) AS calls,
               CAST(SUM(is_error) AS INTEGER) AS errors,

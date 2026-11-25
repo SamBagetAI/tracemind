@@ -26,13 +26,23 @@ export function routineEvents(log: string | string[]): Event[] {
   const seen = new Set<string>();
   const out: Event[] = [];
   for (const page of Array.isArray(log) ? log : [log]) {
+    let last: Event | null = null;
     for (const raw of page.split("\n")) {
       const m = LINE.exec(raw.trimEnd());
-      if (!m || seen.has(raw)) continue;
+      // A line without a timestamp continues the event above it.
+      if (!m) {
+        if (last && raw.trim()) last.text += `\n${raw}`;
+        continue;
+      }
+      if (seen.has(raw)) {
+        last = null;
+        continue;
+      }
       seen.add(raw);
       const [, at, kind, error, name = "", text] = m;
       // Microseconds cut to milliseconds, as every other time Tracemind stores.
-      out.push({ at: new Date(at).toISOString(), kind: error ? `${kind}_error` : kind, name, text });
+      last = { at: new Date(at).toISOString(), kind: error ? `${kind}_error` : kind, name, text };
+      out.push(last);
     }
   }
   return out.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
@@ -64,7 +74,20 @@ export function parseRoutineRuns(log: string | string[], opts: RoutineOptions): 
       cur = [];
     }
   }
-  return runs.map((run) => runTrace(run, opts)).filter((t): t is Trace => t !== null);
+  // A page of the log can begin in the middle of a run. Such a run is left out: the page before
+  // it holds its start, and the next import that includes that page brings it in whole.
+  const whole = runs.filter((run) => run.some((e) => e.kind === "env" || e.kind === "init" || e.kind === "user"));
+  return whole.map((run) => runTrace(run, opts)).filter((t): t is Trace => t !== null);
+}
+
+/** The waiting call a result belongs to (see the comment where it is called). */
+function matchResult(pending: Step[], text: string): Step | undefined {
+  if (pending.length > 1) {
+    const marks = text.match(/\b\d{6,}\b|\/[\w./-]{4,}/g) ?? [];
+    const hits = pending.filter((p) => marks.some((m) => p.input.includes(m)));
+    if (hits.length === 1) return hits[0];
+  }
+  return pending[0];
 }
 
 /** What the person wrote in a follow-up turn, without context the app attached (<artifact-view-context …>). */
@@ -96,9 +119,12 @@ function runTrace(run: Event[], opts: RoutineOptions): Trace | null {
       const s = [...pending].reverse().find((p) => p.name === e.name) ?? pending[pending.length - 1];
       if (s) s.isError = true;
     } else if (e.kind === "tool_result" || e.kind === "tool_result_error") {
-      // Results come back in the order the calls were made; the log does not pair them by id.
-      const s = pending.shift();
+      // The log does not pair results with calls. Calls made together can come back in any order,
+      // so a result that names something only one waiting call used (a tab id, a file) goes to that
+      // call; otherwise results are taken in the order the calls were made.
+      const s = matchResult(pending, e.text);
       if (!s) continue;
+      pending.splice(pending.indexOf(s), 1);
       s.output = clip(e.text, 4000);
       s.isError = s.isError || e.kind === "tool_result_error";
       const d = Date.parse(e.at) - Date.parse(s.at);
@@ -121,7 +147,8 @@ function runTrace(run: Event[], opts: RoutineOptions): Trace | null {
   const tools = steps.filter((s) => s.kind === "tool" || s.kind === "subagent");
   const outcome: Outcome = failed ? "error" : "ok";
   const session: Session = {
-    id: `routine-${opts.sessionId}-${started.replace(/[^0-9]/g, "").slice(0, 17)}`,
+    // Keyed by when the run ended: its result line is always there, while a page may cut its start.
+    id: `routine-${opts.sessionId}-${result.at.replace(/[^0-9]/g, "").slice(0, 17)}`,
     agent: "claude-code-routine",
     person: opts.person,
     project: `routines/${name}`,

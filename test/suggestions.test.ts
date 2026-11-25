@@ -125,6 +125,10 @@ describe("suggestions", () => {
     await store.saveTrace("local", given);
     await store.saveTrace("local", withHook("b2", 1, { type: "hook_success", stdout: "" }));
     await store.saveTrace("local", withHook("b3", 2, { type: "hook_non_blocking_error", stderr: "node: not found" }));
+    // A routine run starting since then never runs this machine's hooks: it is not a missed brief.
+    const { parseRoutineRuns } = await import("../src/core/parse-routine.ts");
+    const at = new Date(later + 3 * 600_000).toISOString();
+    for (const run of parseRoutineRuns(`[${at}] env[info]: Allocating sandbox\n[${at}] tool_use Bash: {}\n[${at}] tool_result: ok\n[${at}] result: success is_error=false turns=1 duration=1s — ok`, { routine: "R", sessionId: "s", person: "Ada" })) await store.saveTrace("local", run);
     await post(app, "/api/suggestions/nothing/dismiss"); // any write clears the cached list
     const after = (await (await app.request("/api/suggestions")).json()).find((s: any) => s.id === routine.id);
     expect(after.checks).toEqual({ sessions: 3, given: 1, empty: 1, failed: 1, unrecorded: 0 });
