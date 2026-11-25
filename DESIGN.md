@@ -500,3 +500,17 @@ landing-page effects on a debugging tool.
 - "few calls" is plain muted text, not a pill.
 - Each session row shows where along the session its tool calls failed, the same picture as the strip
   at the top of the session page. Overview lists the latest five sessions with that strip.
+
+## 11. UX references (how the product works, not how it looks)
+
+Five products that do part of Tracemind's job well, and the one idea each lends.
+
+| Product | What it does well | The idea for Tracemind |
+|---|---|---|
+| [Linear triage](https://linear.app/docs/triage) | New work lands in one queue, and each item is decided with one key: accept (1), decline (2), duplicate (3), snooze (H). | Issues and fixes are decisions to make, not pages to browse. A queue you empty. |
+| [Sentry issue details](https://docs.sentry.io/product/issues/issue-details) | One page per issue: the stack trace, the [breadcrumbs](https://docs.sentry.io/product/error-monitoring/breadcrumbs) that led to it, and a [suggested fix](https://docs.sentry.io/product/ai-in-sentry/seer/issue-fix) you can apply, open as a PR or hand to a coding agent. | The steps before a failure are its breadcrumbs, and a fix can go straight to Claude. |
+| [Honeycomb BubbleUp](https://docs.honeycomb.io/investigate/analyze/identify-outliers/) | Select the bad part of a chart, and every field is compared between the selection and the baseline, most different first. | "What is different about the sessions that went wrong?" answered by comparison, with counts shown when samples are small. |
+| [Raycast AI](https://manual.raycast.com/ai/quick-ai) | Type a question in the launcher and get the answer in place. [AI Extensions](https://manual.raycast.com/ai/ai-extensions) act on your tools, and show a preview to confirm before an action. | Ask first: the home is a question box answered from Tracemind's own MCP tools, and every change is confirmed. |
+| [Dependabot pull requests](https://docs.github.com/en/code-security/concepts/supply-chain-security/about-dependabot-pull-requests) | Each change arrives as a pull request with its release notes and a compatibility score. [Research](https://arxiv.org/abs/2403.09012v1) on that score warns against showing it without its sample size. | A fix to your Claude setup is a pull request: a diff, the evidence, a confidence from how many sessions, and after merging, checks that say whether it worked. |
+
+The five concepts in `design/ux-concepts.html` (kept local: it shows the author's sessions) each take one of these as the main idea.
