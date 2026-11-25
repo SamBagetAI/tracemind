@@ -188,7 +188,7 @@ Each one is drawn in `design/mockups.html` on the same real session, so they can
 - **Feels like:** a terminal printout you can trust.
 
 ### C: Field notes (based on Langfuse)
-- **Look:** warm paper and ink, a highlighter mark on what went wrong, Schibsted Grotesk for text and Geist
+- **Look:** white paper and ink, a highlighter mark on what went wrong, Schibsted Grotesk for text and Geist
   Mono for labels and data. Crop marks frame the content.
 - **Layout:** three docs-style columns. The left rail holds workspace numbers as a list and recent sessions, the
   center holds the session, and the right rail is "On this page", with an index of failures and memory.
@@ -540,6 +540,6 @@ is not 17 hours of work (`src/core/pricing.ts`).
 subagent on another model is priced at its own rate), with cache reads and writes at their own prices.
 On a subscription nobody pays per token, so the page says "at API prices". Unknown models count as 0.
 
-**The look is warm paper and ink**: background `#fbf8f1`, ink `#1d1b18`, borders `#e9e2d3`, a yellow
+**The look is white paper and ink**: background `#ffffff`, ink `#1d1b18`, borders `#e6e6e3`, a yellow
 highlighter `#ffe58a` under what went wrong, red kept for failures. Schibsted Grotesk for words, IBM Plex
 Mono for machine text. Light is the default; the dark tokens remain for later.

@@ -55,18 +55,6 @@ export function SectionTitle({ children, aside }: { children: React.ReactNode; a
   );
 }
 
-/** Tracemind's mark: a session's time strip, a prompt, three steps and one failure. */
-export function Mark({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 20 14" className={cn("h-3.5 w-5", className)} aria-hidden>
-      <rect x="0" y="0" width="2" height="14" rx="1" className="fill-foreground" />
-      <rect x="4" y="7" width="3" height="7" rx="1" className="fill-muted-foreground" />
-      <rect x="9" y="5" width="4" height="9" rx="1" className="fill-fail" />
-      <rect x="15" y="8" width="5" height="6" rx="1" className="fill-muted-foreground" />
-    </svg>
-  );
-}
-
 /** Sessions in the period before, with ▲ when it grew since and ▼ when it shrank; "new" when it did not happen before. */
 export function Trend({ now, before }: { now: number; before: number }) {
   if (before === 0) return now > 0 ? <span className="text-[12px] text-fail">new</span> : null;
