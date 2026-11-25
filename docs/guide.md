@@ -118,7 +118,7 @@ pnpm dev:web     # the UI with hot reload on :5173, using the API of `tracemind 
 `src/core` reads transcripts and finds issues, `src/store` is SQLite and Postgres behind one
 interface, `src/server` is the Hono API that also serves the UI, `src/cli` is the command, `api/` is
 the Vercel entry. `web/` is the UI: React, [shadcn/ui](https://ui.shadcn.com) components in
-`web/src/components/ui`. `src/mcp` is the MCP server. How the UI looks and why is in [DESIGN.md](../DESIGN.md).
+`web/src/components/ui`. `src/mcp` is the MCP server. How the UI looks and why is in [design.md](design.md).
 
 The Claude Code transcript format is not a public contract. Unknown lines are skipped, so a
 change there loses detail rather than breaking the import.

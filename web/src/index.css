@@ -5,7 +5,7 @@
 @import "@fontsource/ibm-plex-mono/500.css";
 
 /*
- * Tracemind's tokens, from DESIGN.md section 12: white paper and ink, Schibsted Grotesk for words,
+ * Tracemind's tokens, from docs/design.md section 12: white paper and ink, Schibsted Grotesk for words,
  * IBM Plex Mono for machine text, a highlighter mark for what went wrong, red only for failure.
  * shadcn/ui components read these. The dark set is kept for anyone who turns it on.
  */
