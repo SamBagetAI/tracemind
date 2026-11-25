@@ -4,12 +4,10 @@
  * session, and the raw facts suggestions are made from.
  */
 import { causeKey, describeIssue, KIND, topTools, type IssueKind } from "../core/describe.ts";
-import type { Row } from "./db.ts";
-import { kindClause, type IssueRow, type SessionKind, type Store } from "./store.ts";
 import { errorLine } from "../core/issues.ts";
-
-const n = (v: unknown): number => (v == null ? 0 : Number(v));
-const DAY = 86400000;
+import { DAY, daysAgo } from "../core/time.ts";
+import type { Row } from "./db.ts";
+import { kindClause, n, type IssueRow, type SessionKind, type Store } from "./store.ts";
 
 export type IssueGroup = {
   id: string;
@@ -38,25 +36,16 @@ export function days(since: string, until = Date.now()): string[] {
   return out;
 }
 
-type Window = { until?: string; kind?: SessionKind };
+type Window = { kind?: SessionKind };
 
 /** Findings in the window: which session hit which issue, and on which day. */
-async function findingRows(store: Store, ws: string, since: string, { until, kind }: Window = {}, keys?: string[]) {
-  const params: unknown[] = [ws, since];
-  let only = until ? (params.push(until), " AND s.started_at < ?") : "";
+async function findingRows(store: Store, ws: string, since: string, { kind }: Window = {}) {
   const k = kindClause(kind, "s.");
-  only += k.sql;
-  params.push(...k.params);
-  if (keys) {
-    if (keys.length === 0) return [];
-    only += ` AND f.key IN (${keys.map(() => "?").join(", ")})`;
-    params.push(...keys);
-  }
   return store.db.all<Row>(
     `SELECT f.key, f.session_id, s.started_at, SUBSTR(s.started_at, 1, 10) AS day
        FROM findings f JOIN sessions s ON s.workspace = f.workspace AND s.id = f.session_id
-      WHERE f.workspace = ? AND s.started_at >= ?${only}`,
-    params,
+      WHERE f.workspace = ? AND s.started_at >= ?${k.sql}`,
+    [ws, since, ...k.params],
   );
 }
 
@@ -66,7 +55,17 @@ async function findingRows(store: Store, ws: string, since: string, { until, kin
  * this machine's Claude setup, so fixes to that setup are suggested and measured on local sessions only.
  */
 export async function issueGroups(store: Store, ws: string, since: string, window: Window = {}): Promise<IssueGroup[]> {
-  return groupIssues(await store.issues(ws), await findingRows(store, ws, since, window), since);
+  const [issues, rows] = await Promise.all([store.issues(ws), findingRows(store, ws, since, window)]);
+  return groupIssues(issues, rows, since);
+}
+
+/** The window's groups (from `from`) and those of the period before it (from `before` to `from`), from one read of each. */
+export async function issueGroupsWithPrevious(store: Store, ws: string, from: string, before: string) {
+  const [issues, rows] = await Promise.all([store.issues(ws), findingRows(store, ws, before)]);
+  const now: Row[] = [];
+  const prev: Row[] = [];
+  for (const r of rows) (String(r.started_at) >= from ? now : prev).push(r);
+  return [groupIssues(issues, now, from), groupIssues(issues, prev, before)] as const;
 }
 
 /** Each cause's issue keys, from the issues alone. */
@@ -74,14 +73,16 @@ export async function causeKeys(store: Store, ws: string): Promise<Map<string, s
   const out = new Map<string, string[]>();
   for (const issue of await store.issues(ws)) {
     const id = causeKey(issue);
-    out.set(id, [...(out.get(id) ?? []), issue.key]);
+    const keys = out.get(id);
+    if (keys) keys.push(issue.key);
+    else out.set(id, [issue.key]);
   }
   return out;
 }
 
 function groupIssues(issues: IssueRow[], rows: Row[], since: string): IssueGroup[] {
   // Per-day counts cover at most the last year, whatever the window (an all-time query starts in year 0).
-  const yearAgo = new Date(Date.now() - 365 * DAY).toISOString();
+  const yearAgo = daysAgo(365);
   const dayList = days(since < yearAgo ? yearAgo : since);
   const dayIndex = new Map(dayList.map((d, i) => [d, i]));
   const byKey = new Map<string, Row[]>();
@@ -131,19 +132,6 @@ function groupIssues(issues: IssueRow[], rows: Row[], since: string): IssueGroup
     .sort((a, b) => b.sessions - a.sessions || (a.lastSeen < b.lastSeen ? 1 : -1));
 }
 
-/** Distinct sessions per day over the window that hit any of the issues. */
-async function issueHistory(store: Store, ws: string, keys: string[], since: string) {
-  const rows = await findingRows(store, ws, since, {}, keys);
-  const list = days(since);
-  const sets = new Map<string, Set<string>>();
-  for (const r of rows) {
-    const d = String(r.day);
-    if (!sets.has(d)) sets.set(d, new Set());
-    sets.get(d)!.add(String(r.session_id));
-  }
-  return list.map((day) => ({ day, sessions: sets.get(day)?.size ?? 0 }));
-}
-
 /** Where each session failed, as positions along the session (0 to 1), for a small strip per row. */
 export async function failureMarks(store: Store, ws: string, sessions: { id: string; stepCount: number }[]) {
   const out: Record<string, { at: number; kind: "error" | "interrupt" }[]> = {};
@@ -189,7 +177,8 @@ export async function causeDetail(store: Store, ws: string, key: string, since: 
       GROUP BY s.id, s.title, s.project, s.person, s.started_at, s.ended_at ORDER BY s.ended_at DESC LIMIT 200`,
     [ws, ...keys],
   );
-  const history = await issueHistory(store, ws, keys, since);
+  // Distinct sessions per day over the window: the same days groupIssues counted (the API's window is at most a year).
+  const history = days(since).map((day, i) => ({ day, sessions: inWindow?.daily[i] ?? 0 }));
   const latest = sessions[0];
   const [step] = latest
     ? await store.db.all<Row>("SELECT name, input, output FROM steps WHERE workspace = ? AND session_id = ? AND seq = ?", [ws, latest.id, latest.seq])

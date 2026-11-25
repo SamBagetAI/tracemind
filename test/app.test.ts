@@ -49,7 +49,7 @@ describe("the local app", () => {
     expect((await app.request("http://evil.example:4545/api/overview")).status).toBe(403);
     expect((await app.request("http://evil.example:4545/api/sessions")).status).toBe(403);
     expect((await app.request("http://evil.example:4545/mcp", json({}, { accept: "application/json, text/event-stream" }))).status).toBe(403);
-    const dismiss = await app.request("http://evil.example:4545/api/issues/x/status", json({ status: "resolved" }, { origin: "http://evil.example:4545" }));
+    const dismiss = await app.request("http://evil.example:4545/api/cause/x/status", json({ status: "resolved" }, { origin: "http://evil.example:4545" }));
     expect(dismiss.status).toBe(403);
   });
 });
@@ -128,7 +128,7 @@ describe("numbers the pages show", () => {
 describe("local mode", () => {
   it("serves every API the pages use without signing in", async () => {
     const { app } = await localApp();
-    for (const path of ["/api/me", "/api/overview", "/api/sessions", "/api/sessions?marks=1", "/api/sessions/sess-1", "/api/issues", "/api/issue-groups", "/api/projects", "/api/tools", "/api/memory", "/api/suggestions"]) {
+    for (const path of ["/api/me", "/api/overview", "/api/sessions", "/api/sessions?marks=1", "/api/sessions/sess-1", "/api/issue-groups", "/api/tools", "/api/memory", "/api/suggestions"]) {
       expect((await app.request(path)).status, path).toBe(200);
     }
     expect((await app.request("/api/sessions/nope")).status).toBe(404);
@@ -142,10 +142,12 @@ describe("local mode", () => {
     expect(refs).toHaveLength(4);
     expect(refs.map((r) => r.num).sort()).toEqual([1, 2, 3, 4]);
     expect(refs.every((r) => r.sessions === 1 && r.status === "open")).toBe(true);
+    expect(t.nav).toMatchObject({ newer: null, older: null, index: 0, total: 1 });
     const [s] = await (await app.request("/api/sessions")).json();
     expect(s.issueCount).toBe(4);
     const o = await (await app.request("/api/overview?days=36500")).json();
-    expect(o.strip).toHaveLength(1);
+    expect(o.strip).toBeUndefined();
+    expect(o.replies).toBe(1); // the session starts with the person's prompt
     const groups = await (await app.request("/api/issue-groups?days=365")).json();
     expect(groups.reduce((n: number, g: { issues: unknown[] }) => n + g.issues.length, 0)).toBe(4);
   });
@@ -165,16 +167,17 @@ describe("local mode", () => {
   });
 
   it("resolves and reopens an issue, and refuses it from another site", async () => {
-    const { app } = await localApp();
-    const [issue] = await (await app.request("/api/issues")).json();
-    const path = `http://localhost/api/issues/${encodeURIComponent(issue.key)}/status`;
+    const { app, store } = await localApp();
+    const [issue] = await store.issues("local");
+    const path = `http://localhost/api/cause/${encodeURIComponent(issue.key)}/status`;
     const evil = await app.request(path, json({ status: "resolved" }, { origin: "https://evil.example" }));
     expect(evil.status).toBe(403);
     const ok = await app.request(path, json({ status: "resolved", note: "fixed it" }, { origin: "http://localhost" }));
-    expect(await ok.json()).toMatchObject({ status: "resolved", resolvedBy: "Ada", note: "fixed it" });
-    const back = await app.request(path, json({ status: "open" }, { origin: "http://localhost" }));
-    expect((await back.json()).status).toBe("open");
-    expect((await app.request("http://localhost/api/issues/nope/status", json({ status: "resolved" }, { origin: "http://localhost" }))).status).toBe(404);
+    expect(await ok.json()).toEqual({ ok: true });
+    expect(await store.issue("local", issue.key)).toMatchObject({ status: "resolved", resolvedBy: "Ada", note: "fixed it" });
+    await app.request(path, json({ status: "open" }, { origin: "http://localhost" }));
+    expect((await store.issue("local", issue.key))!.status).toBe("open");
+    expect((await app.request("http://localhost/api/cause/nope/status", json({ status: "resolved" }, { origin: "http://localhost" }))).status).toBe(404);
   });
 });
 

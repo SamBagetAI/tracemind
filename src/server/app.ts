@@ -10,7 +10,8 @@ import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { InvalidTrace, validateTrace } from "../core/validate.ts";
-import { causeCounts, causeDetail, failureMarks, issueGroups, sessionIssues } from "../store/insights.ts";
+import { daysAgo } from "../core/time.ts";
+import { causeCounts, causeDetail, causeKeys, failureMarks, issueGroupsWithPrevious, sessionIssues } from "../store/insights.ts";
 import type { SessionKind, Store } from "../store/store.ts";
 import { apply, buildSuggestions, copyOf, effect, preview, sessionContext, setState, undo } from "./suggestions.ts";
 
@@ -32,7 +33,6 @@ export type AppOptions = {
 type Env = { Variables: { viewer: Viewer } };
 
 const COOKIE = "tm_token";
-const DAY = 86400000;
 
 const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -78,7 +78,12 @@ function localWrite(c: Context, mode: "local" | "server"): string | null {
 
 /** The window a request asks for, in days (1–365, 30 by default), and where it starts. */
 const windowDays = (c: Context) => Math.min(365, Math.max(1, Number(c.req.query("days")) || 30));
-const since = (days: number) => new Date(Date.now() - days * DAY).toISOString();
+const since = (days: number) => daysAgo(days);
+/** A window of `days` days and the period of the same length just before it. */
+const windowOf = (days: number) => {
+  const from = since(days);
+  return { from, before: daysAgo(days, Date.parse(from)) };
+};
 /** The `kind` a request asks for (a person's sessions or routine runs), or both. */
 const kindOf = (c: Context): SessionKind | undefined => {
   const k = c.req.query("kind");
@@ -92,6 +97,7 @@ const statusOf = (c: Context): "open" | "resolved" | undefined => {
 
 export function createApp(opts: AppOptions) {
   const { store, mode } = opts;
+  const contextCommand = opts.contextCommand ?? "tracemind context";
   const app = new Hono<Env>();
 
   app.use("*", async (c, next) => {
@@ -203,20 +209,10 @@ export function createApp(opts: AppOptions) {
 
   api.get("/overview", async (c) => {
     const v = c.get("viewer");
-    const from = since(windowDays(c));
-    // The period of the same length just before, for "1 of 2 the week before". Sums are additive,
-    // so it is the longer window minus this one.
-    const days = windowDays(c);
+    // The period of the same length just before, for "1 of 2 the week before".
+    const { from, before } = windowOf(windowDays(c));
     const kind = kindOf(c);
-    const [now, both] = await Promise.all([store.overview(v.workspace, from, kind), store.overview(v.workspace, since(Math.min(730, days * 2)), kind)]);
-    const previous = {
-      sessions: both.sessions - now.sessions,
-      withIssues: both.withIssues - now.withIssues,
-      activeMs: both.activeMs - now.activeMs,
-      toolErrors: both.toolErrors - now.toolErrors,
-      outputTokens: both.outputTokens - now.outputTokens,
-      costUsd: Math.max(0, both.costUsd - now.costUsd),
-    };
+    const [now, previous] = await Promise.all([store.overview(v.workspace, from, kind), store.totals(v.workspace, before, from, kind)]);
     return c.json({ since: from, ...now, previous });
   });
 
@@ -235,14 +231,14 @@ export function createApp(opts: AppOptions) {
 
   api.get("/sessions/:id", async (c) => {
     const ws = c.get("viewer").workspace;
-    const t = await store.trace(ws, c.req.param("id"));
+    const from = since(windowDays(c));
+    const [t, nav] = await Promise.all([store.trace(ws, c.req.param("id")), store.neighbours(ws, c.req.param("id"), from)]);
     if (!t) return c.json({ error: "not found" }, 404);
     // Each issue's session count over the same window as the rest of the app.
     const keys = Object.keys(t.issues);
     // Counts are per cause (all variants), the same numbers the Issues list shows. A session older
     // than the window keeps all-time counts: "0 sessions in 30 days" would be wrong for an issue
     // this very session hit.
-    const from = since(windowDays(c));
     const inWindow = !!c.req.query("days") && t.session.startedAt >= from;
     const [counts, fx] = await Promise.all([keys.length ? causeCounts(store, ws, inWindow ? from : "0000") : new Map<string, never>(), keys.length ? fixes(ws, windowDays(c)) : new Map<string, { fix: "ready" | "applied"; at: string | null }>()]);
     for (const k of keys) {
@@ -252,16 +248,9 @@ export function createApp(opts: AppOptions) {
       const fixAt = f?.at ?? null;
       t.issues[k] = { ...t.issues[k], sessions: cc?.sessions ?? t.issues[k].sessions, cause: cc?.cause, what: cc?.what, fix, fixAt } as typeof t.issues[string];
     }
-    return c.json({ ...t, issueWindow: inWindow ? Number(c.req.query("days")) : null });
+    return c.json({ ...t, nav, issueWindow: inWindow ? Number(c.req.query("days")) : null });
   });
 
-  api.get("/projects", async (c) => c.json(await store.projects(c.get("viewer").workspace)));
-
-  api.get("/issues", async (c) => {
-    return c.json(await store.issues(c.get("viewer").workspace, statusOf(c)));
-  });
-
-  /** For each cause: whether a suggested change exists for it, and whether it was applied. */
   /**
    * For each cause: whether a fix exists for it and whether it was applied (and when). Only changes
    * Tracemind can make count as fixes; an investigation is a prompt, not a fix.
@@ -269,7 +258,7 @@ export function createApp(opts: AppOptions) {
   const fixes = async (ws: string, days: number) => {
     const out = new Map<string, { fix: "ready" | "applied"; at: string | null }>();
     for (const sg of await suggestionsFor(ws, days)) {
-      if (sg.status === "dismissed" || (sg.action.type !== "rule" && sg.action.type !== "routine")) continue;
+      if (sg.status === "dismissed" || !sg.fixable) continue;
       for (const cid of sg.causes) {
         if (out.get(cid)?.fix === "applied") continue;
         out.set(cid, sg.status === "applied" ? { fix: "applied", at: sg.at } : { fix: "ready", at: null });
@@ -282,13 +271,8 @@ export function createApp(opts: AppOptions) {
     const ws = c.get("viewer").workspace;
     const s = statusOf(c);
     const days = windowDays(c);
-    const from = since(days);
-    const before = new Date(Date.parse(from) - days * DAY).toISOString();
-    const [groups, previous, fix] = await Promise.all([
-      issueGroups(store, ws, from),
-      issueGroups(store, ws, before, { until: from }),
-      fixes(ws, days),
-    ]);
+    const { from, before } = windowOf(days);
+    const [[groups, previous], fix] = await Promise.all([issueGroupsWithPrevious(store, ws, from, before), fixes(ws, days)]);
     const prev = new Map(previous.map((g) => [g.id, g.sessions]));
     const shown = s ? groups.filter((g) => g.status === s) : groups;
     return c.json(shown.map((g) => ({ ...g, previous: prev.get(g.id) ?? 0, fix: fix.get(g.id)?.fix ?? null, fixAt: fix.get(g.id)?.at ?? null })));
@@ -311,23 +295,14 @@ export function createApp(opts: AppOptions) {
   api.post("/cause/:key/status", async (c) => {
     if (!sameOrigin(c)) return c.json({ error: "forbidden" }, 403);
     const v = c.get("viewer");
-    const d = await causeDetail(store, v.workspace, c.req.param("key"), since(30));
-    if (!d) return c.json({ error: "not found" }, 404);
-    const body = await c.req.json().catch(() => ({}));
-    const status = body.status === "resolved" ? "resolved" : "open";
-    for (const i of d.cause.issues) await store.setIssueStatus(v.workspace, i.key, status, v.person, String(body.note ?? ""));
-    return c.json({ ok: true });
-  });
-
-  api.post("/issues/:key/status", async (c) => {
-    if (!sameOrigin(c)) return c.json({ error: "forbidden" }, 403);
-    const v = c.get("viewer");
-    const body = await c.req.json().catch(() => ({}));
-    const status = body.status === "resolved" ? "resolved" : "open";
+    // Every variant of the cause the key belongs to.
     const key = c.req.param("key");
-    if (!(await store.issue(v.workspace, key))) return c.json({ error: "not found" }, 404);
-    await store.setIssueStatus(v.workspace, key, status, v.person, String(body.note ?? ""));
-    return c.json((await store.issue(v.workspace, key))!.issue);
+    const keys = [...(await causeKeys(store, v.workspace)).values()].find((ks) => ks.includes(key));
+    if (!keys) return c.json({ error: "not found" }, 404);
+    const body = await c.req.json().catch(() => ({}));
+    const status = body.status === "resolved" ? "resolved" : "open";
+    for (const k of keys) await store.setIssueStatus(v.workspace, k, status, v.person, String(body.note ?? ""));
+    return c.json({ ok: true });
   });
 
   api.get("/tools", async (c) => {
@@ -351,7 +326,7 @@ export function createApp(opts: AppOptions) {
   api.post("/suggestions/:id/preview", async (c) => {
     const s = await findSuggestion(c);
     if (!s) return c.json({ error: "not found" }, 404);
-    const p = preview(s, opts.contextCommand ?? "tracemind context");
+    const p = preview(s, contextCommand);
     if (s.action.type === "routine") {
       // What a new session would be told, for the most recently used project that has something to say.
       const recent = await store.sessions(c.get("viewer").workspace, { limit: 40 });
@@ -377,7 +352,7 @@ export function createApp(opts: AppOptions) {
     const refused = localWrite(c, mode);
     if (refused) return c.json({ error: refused }, refused === "forbidden" ? 403 : 400);
     try {
-      if (verb === "apply") return c.json({ ok: true, file: await apply(store, v.workspace, s, opts.contextCommand ?? "tracemind context") });
+      if (verb === "apply") return c.json({ ok: true, file: await apply(store, v.workspace, s, contextCommand) });
       await undo(store, v.workspace, s);
       return c.json({ ok: true });
     } catch (e) {

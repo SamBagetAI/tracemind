@@ -18,11 +18,11 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { claudeHome, hasHook, setHook } from "../cli/claude.ts";
 import { causeKey, describeIssue } from "../core/describe.ts";
+import { daysAgo } from "../core/time.ts";
 import type { Row } from "../store/db.ts";
 import { causeKeys, issueGroups, type IssueGroup } from "../store/insights.ts";
 import { kindClause, type Store } from "../store/store.ts";
 
-const DAY = 86400000;
 /** Tag on the routine's hook command (a shell comment), so it can be found again whatever the path. */
 const CONTEXT_MARKER = "tracemind-context";
 const tagged = (command: string) => `${command} # ${CONTEXT_MARKER}`;
@@ -32,6 +32,9 @@ export type Action =
   | { type: "routine"; event: "SessionStart"; command: string }
   | { type: "prompt"; text: string }
   | { type: "tip" };
+
+/** Whether Tracemind can make the change itself (a line in a file, a hook), rather than hand it to a person. */
+export const canApply = (a: Action) => a.type === "rule" || a.type === "routine";
 
 export type Suggestion = {
   id: string;
@@ -46,6 +49,8 @@ export type Suggestion = {
   /** The issue it is about, to link to: the most frequent issue of its first cause. */
   issue: { key: string; num: number; what: string; sessions: number } | null;
   action: Action;
+  /** Tracemind can apply it (canApply): a fix, not a prompt or a tip. */
+  fixable: boolean;
   status: "open" | "applied" | "dismissed";
   at: string | null;
   /** After it was applied: sessions that hit the causes, before (30 days) and since. */
@@ -105,27 +110,29 @@ async function examplesFor(store: Store, ws: string, keys: string[], limit = 3) 
 
 /** Everything the rules below look at, in one place. */
 async function facts(store: Store, ws: string, days: number) {
-  const since = new Date(Date.now() - days * DAY).toISOString();
-  // Local sessions only: routine runs never read this machine's Claude setup, so a fix to it can't help them.
-  const groups = await issueGroups(store, ws, since, { kind: "sessions" });
-  const sessions = await store.db.all<Row>(`SELECT id, project, title FROM sessions WHERE workspace = ? AND started_at >= ?${LOCAL.sql}`, [ws, since, ...LOCAL.params]);
-  const prodReads = await store.db.all<Row>(
-    `SELECT s.project, st.session_id, st.seq, st.input, s.title FROM steps st JOIN sessions s ON s.workspace = st.workspace AND s.id = st.session_id
-      WHERE st.workspace = ? AND s.started_at >= ?${LOCAL_S.sql} AND st.is_error = 1
-        AND (st.output LIKE '%[Production Reads]%' OR st.output LIKE '%[Credential Materialization]%' OR st.output LIKE '%[PII Data Handling]%')`,
-    [ws, since, ...LOCAL_S.params],
-  );
-  const compactions = await store.db.all<Row>(
-    `SELECT s.project, COUNT(DISTINCT st.session_id) AS sessions FROM steps st JOIN sessions s ON s.workspace = st.workspace AND s.id = st.session_id
-      WHERE st.workspace = ? AND s.started_at >= ?${LOCAL_S.sql} AND st.kind = 'compact' GROUP BY s.project`,
-    [ws, since, ...LOCAL_S.params],
-  );
-  const [interrupts] = await store.db.all<Row>(
-    `SELECT CAST(COUNT(*) AS INTEGER) AS n, CAST(COUNT(DISTINCT s.session_id) AS INTEGER) AS sessions FROM steps s JOIN steps p
-        ON p.workspace = s.workspace AND p.session_id = s.session_id AND p.seq = s.seq - 1
-      WHERE s.workspace = ? AND s.kind = 'interrupt' AND p.kind = 'prompt' AND s.at >= ?`,
-    [ws, since],
-  );
+  const since = daysAgo(days);
+  const [groups, sessions, prodReads, compactions, [interrupts]] = await Promise.all([
+    // Local sessions only: routine runs never read this machine's Claude setup, so a fix to it can't help them.
+    issueGroups(store, ws, since, { kind: "sessions" }),
+    store.db.all<Row>(`SELECT id, project, title FROM sessions WHERE workspace = ? AND started_at >= ?${LOCAL.sql}`, [ws, since, ...LOCAL.params]),
+    store.db.all<Row>(
+      `SELECT s.project, st.session_id, st.seq, st.input, s.title FROM steps st JOIN sessions s ON s.workspace = st.workspace AND s.id = st.session_id
+        WHERE st.workspace = ? AND s.started_at >= ?${LOCAL_S.sql} AND st.is_error = 1
+          AND (st.output LIKE '%[Production Reads]%' OR st.output LIKE '%[Credential Materialization]%' OR st.output LIKE '%[PII Data Handling]%')`,
+      [ws, since, ...LOCAL_S.params],
+    ),
+    store.db.all<Row>(
+      `SELECT s.project, COUNT(DISTINCT st.session_id) AS sessions FROM steps st JOIN sessions s ON s.workspace = st.workspace AND s.id = st.session_id
+        WHERE st.workspace = ? AND s.started_at >= ?${LOCAL_S.sql} AND st.kind = 'compact' GROUP BY s.project`,
+      [ws, since, ...LOCAL_S.params],
+    ),
+    store.db.all<Row>(
+      `SELECT CAST(COUNT(*) AS INTEGER) AS n, CAST(COUNT(DISTINCT s.session_id) AS INTEGER) AS sessions FROM steps s JOIN steps p
+          ON p.workspace = s.workspace AND p.session_id = s.session_id AND p.seq = s.seq - 1
+        WHERE s.workspace = ? AND s.kind = 'interrupt' AND p.kind = 'prompt' AND s.at >= ?`,
+      [ws, since],
+    ),
+  ]);
   return { since, groups, sessions, prodReads, compactions, interrupts: { n: Number(interrupts?.n ?? 0), sessions: Number(interrupts?.sessions ?? 0) } };
 }
 
@@ -158,9 +165,8 @@ const GLOBAL_RULES: { what: string; title: string; text: string; min: number }[]
 ];
 
 export async function buildSuggestions(store: Store, ws: string, local: boolean, days = 90): Promise<Suggestion[]> {
-  const WINDOW_DAYS = days;
   const f = await facts(store, ws, days);
-  const out: Omit<Suggestion, "status" | "at" | "effect" | "issue">[] = [];
+  const out: Built[] = [];
   const covered = new Set<string>();
 
   // 1. Global rules for causes that happen across projects.
@@ -172,7 +178,7 @@ export async function buildSuggestions(store: Store, ws: string, local: boolean,
       id: sid("rule", rule.what),
       kind: "rule",
       title: rule.title,
-      why: `"${g.what}" happened in ${g.sessions} sessions in the last ${WINDOW_DAYS} days${g.tools ? ` (${g.tools})` : ""}.`,
+      why: `"${g.what}" happened in ${g.sessions} sessions in the last ${days} days${g.tools ? ` (${g.tools})` : ""}.`,
       sessions: g.sessions,
       examples: await examplesFor(store, ws, g.issues.map((i) => i.key)),
       causes: [g.id],
@@ -271,7 +277,6 @@ export async function buildSuggestions(store: Store, ws: string, local: boolean,
   if (recurring.length >= 2) {
     out.push({
       ...ROUTINE,
-      id: sid("routine", "context"),
       why: `${recurring.length} issues happened in 3 or more sessions each. A Claude Code hook can give each new session the ones from its own project, with what to do instead, before it starts.`,
       sessions: Math.max(...recurring.map((g) => g.sessions)),
       examples: [],
@@ -290,7 +295,7 @@ export async function buildSuggestions(store: Store, ws: string, local: boolean,
       id: sid("investigate", `${g.kind}|${g.what}`),
       kind: "investigate",
       title: `Investigate: ${g.what}`,
-      why: `It happened in ${g.sessions} sessions in the last ${WINDOW_DAYS} days${g.tools ? ` (${g.tools})` : ""}, and no rule here covers it yet.`,
+      why: `It happened in ${g.sessions} sessions in the last ${days} days${g.tools ? ` (${g.tools})` : ""}, and no rule here covers it yet.`,
       sessions: g.sessions,
       examples: ex,
       causes: [g.id],
@@ -330,12 +335,12 @@ export async function buildSuggestions(store: Store, ws: string, local: boolean,
     }
   }
   // The brief installed by hand, or by an older Tracemind, before a copy was kept.
-  const routineId = sid("routine", "context");
-  if (local && !built.has(routineId) && hasHook("SessionStart", CONTEXT_MARKER)) {
-    out.push({ ...ROUTINE, id: routineId, why: "Installed: each new session is told what keeps going wrong in its project.", sessions: 0, examples: [], causes: [] });
+  if (local && !built.has(ROUTINE.id) && hasHook("SessionStart", CONTEXT_MARKER)) {
+    out.push({ ...ROUTINE, why: "Installed: each new session is told what keeps going wrong in its project.", sessions: 0, examples: [], causes: [] });
   }
-  const result: Suggestion[] = [];
-  for (const s of out) {
+  // Which issues make up each cause: read once, the first time an applied fix needs its before/since numbers.
+  let byCause: Promise<Map<string, string[]>> | undefined;
+  const result = await Promise.all(out.map(async (s): Promise<Suggestion> => {
     const st = states.get(s.id);
     let status = (st?.status as Suggestion["status"]) ?? "open";
     // A routine is applied when its hook is there, whoever added it.
@@ -343,37 +348,39 @@ export async function buildSuggestions(store: Store, ws: string, local: boolean,
     const at = st ? String(st.at) : null;
     const g = f.groups.find((x) => x.id === s.causes[0]);
     const issue = g && s.kind !== "routine" ? { key: g.issues[0].key, num: g.issues[0].num, what: g.what, sessions: g.sessions } : null;
-    result.push({
-      ...s,
-      issue,
-      status,
-      at,
-      effect: status === "applied" && at ? await effect(store, ws, s.causes, at) : null,
-      checks: s.kind === "routine" && status === "applied" && at ? await briefChecks(store, ws, at) : null,
-    });
-  }
+    const [eff, checks] = await Promise.all([
+      status === "applied" && at ? effect(store, ws, s.causes, at, s.causes.length ? await (byCause ??= causeKeys(store, ws)) : undefined) : null,
+      s.kind === "routine" && status === "applied" && at ? briefChecks(store, ws, at) : null,
+    ]);
+    return { ...s, fixable: canApply(s.action), issue, status, at, effect: eff, checks };
+  }));
   const order = { open: 0, applied: 1, dismissed: 2 };
   return result.sort((a, b) => order[a.status] - order[b.status] || b.sessions - a.sessions);
 }
 
-/** Sessions that hit any of the causes, in the 30 days before `at` and since. */
-export async function effect(store: Store, ws: string, causes: string[], at: string) {
+/**
+ * Sessions that hit any of the causes, in the 30 days before `at` and since. `byCause` is each
+ * cause's issue keys (causeKeys), when the caller already has them.
+ */
+export async function effect(store: Store, ws: string, causes: string[], at: string, byCause?: Map<string, string[]>) {
   // Which issues make up each cause; the counts below already keep to each window.
-  const byCause = causes.length ? await causeKeys(store, ws) : new Map<string, string[]>();
+  const keysOf = byCause ?? (causes.length ? await causeKeys(store, ws) : new Map<string, string[]>());
+  const keys = causes.flatMap((c) => keysOf.get(c) ?? []);
   const window = async (from: string, to: string) => {
-    const [total] = await store.db.all<Row>(`SELECT CAST(COUNT(*) AS INTEGER) AS c FROM sessions WHERE workspace = ? AND started_at >= ? AND started_at < ?${LOCAL.sql}`, [ws, from, to, ...LOCAL.params]);
-    if (causes.length === 0) return { sessions: Number(total?.c ?? 0), hit: 0 };
-    const keys = causes.flatMap((c) => byCause.get(c) ?? []);
-    if (keys.length === 0) return { sessions: Number(total?.c ?? 0), hit: 0 };
-    const [hit] = await store.db.all<Row>(
-      `SELECT CAST(COUNT(DISTINCT f.session_id) AS INTEGER) AS c FROM findings f JOIN sessions s ON s.workspace = f.workspace AND s.id = f.session_id
-        WHERE f.workspace = ? AND s.started_at >= ? AND s.started_at < ?${LOCAL_S.sql} AND f.key IN (${keys.map(() => "?").join(", ")})`,
-      [ws, from, to, ...LOCAL_S.params, ...keys],
-    );
+    const [[total], [hit]] = await Promise.all([
+      store.db.all<Row>(`SELECT CAST(COUNT(*) AS INTEGER) AS c FROM sessions WHERE workspace = ? AND started_at >= ? AND started_at < ?${LOCAL.sql}`, [ws, from, to, ...LOCAL.params]),
+      keys.length === 0
+        ? [undefined]
+        : store.db.all<Row>(
+            `SELECT CAST(COUNT(DISTINCT f.session_id) AS INTEGER) AS c FROM findings f JOIN sessions s ON s.workspace = f.workspace AND s.id = f.session_id
+              WHERE f.workspace = ? AND s.started_at >= ? AND s.started_at < ?${LOCAL_S.sql} AND f.key IN (${keys.map(() => "?").join(", ")})`,
+            [ws, from, to, ...LOCAL_S.params, ...keys],
+          ),
+    ]);
     return { sessions: Number(total?.c ?? 0), hit: Number(hit?.c ?? 0) };
   };
-  const before = new Date(Date.parse(at) - 30 * DAY).toISOString();
-  return { before: await window(before, at), since: await window(at, "9999") };
+  const [before, since] = await Promise.all([window(daysAgo(30, Date.parse(at)), at), window(at, "9999")]);
+  return { before, since };
 }
 
 // ---------------------------------------------------------------- applying
@@ -401,6 +408,7 @@ function backupDir(): string {
 }
 
 export async function apply(store: Store, ws: string, s: Suggestion, command: string): Promise<string> {
+  if (!s.fixable) throw new Error("This suggestion is not something Tracemind can apply; copy it to Claude instead.");
   if (s.action.type === "rule") {
     const file = s.action.file;
     const before = existsSync(file) ? readFileSync(file, "utf8") : null;
@@ -416,7 +424,7 @@ export async function apply(store: Store, ws: string, s: Suggestion, command: st
     await setState(store, ws, s.id, "applied", { file, fix: copyOf(s) });
     return file;
   }
-  throw new Error("This suggestion is not something Tracemind can apply; copy it to Claude instead.");
+  throw new Error(`Unknown fix type: ${s.action.type}`);
 }
 
 export async function undo(store: Store, ws: string, s: Suggestion): Promise<void> {
@@ -435,12 +443,13 @@ export async function undo(store: Store, ws: string, s: Suggestion): Promise<voi
 }
 
 const ROUTINE = {
+  id: sid("routine", "context"),
   kind: "routine" as const,
   title: "Brief new sessions on their project's known problems",
   action: { type: "routine" as const, event: "SessionStart" as const, command: "" },
 };
 
-type Built = Omit<Suggestion, "status" | "at" | "effect" | "issue">;
+type Built = Omit<Suggestion, "status" | "at" | "effect" | "issue" | "fixable">;
 
 /** What is kept of a fix when it is applied or dismissed, to list it again later. */
 export function copyOf(s: Built): Built {
@@ -476,7 +485,7 @@ ADVICE["Not signed in to the service"] = "Some connectors here are not signed in
 export async function sessionContext(store: Store, ws: string, cwd: string): Promise<string> {
   const root = projectRoot(cwd);
   if (!root) return "";
-  const since = new Date(Date.now() - 30 * DAY).toISOString();
+  const since = daysAgo(30);
   const ids = (await store.db.all<Row>("SELECT id, project FROM sessions WHERE workspace = ? AND started_at >= ?", [ws, since]))
     .filter((r) => projectRoot(String(r.project)) === root)
     .map((r) => String(r.id));

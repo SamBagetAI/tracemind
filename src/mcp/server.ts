@@ -9,7 +9,12 @@
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { describeIssue } from "../core/describe.ts";
+import { describeIssue, findingsByCause, startFiles } from "../core/describe.ts";
+import { isToolStep } from "../core/issues.ts";
+import { parseRoutineRuns, routineSessionOf } from "../core/parse-routine.ts";
+import type { Finding, MemoryEvent, Session, Step } from "../core/types.ts";
+import type { Suggestion } from "../server/suggestions.ts";
+import type { IssueGroup } from "../store/insights.ts";
 
 /** Calls the API: a path under /api, and a JSON body for a POST. Throws the API's error message. */
 export type ApiCall = (path: string, body?: unknown) => Promise<any>;
@@ -20,10 +25,8 @@ const days = z.number().int().min(1).max(365).default(30).describe("The window i
 const text = (value: unknown) => ({ content: [{ type: "text" as const, text: typeof value === "string" ? value : JSON.stringify(value, null, 1) }] });
 const clip = (s: string | null | undefined, n: number) => (!s ? "" : s.length > n ? `${s.slice(0, n)}…` : s);
 
-type Group = {
-  what: string; plain: boolean; raw: string; kindLabel: string; tools: string; sessions: number; previous?: number;
-  status: string; reopened: boolean; fix?: string | null; firstSeen: string; lastSeen: string; issues: { key: string }[];
-};
+/** An issue group as GET /issue-groups returns it (src/server/app.ts). */
+type Group = IssueGroup & { previous?: number; fix?: "ready" | "applied" | null; fixAt?: string | null };
 
 /** An issue as an agent needs it: its name, how often, the trend, whether a fix exists, and the key to ask about it. */
 function issueRow(g: Group) {
@@ -40,12 +43,6 @@ function issueRow(g: Group) {
   };
 }
 
-type Suggestion = {
-  id: string; kind: string; title: string; why: string; sessions: number; status: string; causes: string[];
-  action: { type: string; file?: string; text?: string; scope?: string }; examples: { id: string; title: string; seq?: number }[];
-  effect?: unknown; at?: string | null; checks?: unknown;
-};
-
 function fixRow(s: Suggestion) {
   const a = s.action;
   return {
@@ -60,7 +57,7 @@ function fixRow(s: Suggestion) {
       : a.type === "routine" ? { type: "a SessionStart hook in ~/.claude/settings.json that briefs new sessions on their project's known issues" }
       : a.type === "prompt" ? { type: "a prompt to run", prompt: a.text }
       : { type: s.kind },
-    canApply: a.type === "rule" || a.type === "routine",
+    canApply: s.fixable,
     ...(s.status === "applied" ? { appliedAt: s.at, effect: s.effect, ...(s.checks ? { briefSinceInstalled: s.checks } : {}) } : {}),
   };
 }
@@ -191,7 +188,7 @@ export function createMcpServer(call: ApiCall, opts: { canApply: boolean }): Mcp
       const q = new URLSearchParams({ days: String(days), limit: "2000" });
       if (query) q.set("q", query);
       if (project) q.set("project", project);
-      const list: { id: string; title: string; project: string; gitBranch: string | null; startedAt: string; endedAt: string; toolCalls: number; toolErrors: number; issueCount: number; person: string; activeMs: number; costUsd: number }[] = await call(`/sessions?${q}`);
+      const list: (Session & { activeMs: number; costUsd: number; issueCount: number })[] = await call(`/sessions?${q}`);
       const shown = list.filter((s) => !only_with_issues || s.issueCount > 0);
       return text({
         window: `last ${days} days`,
@@ -216,19 +213,13 @@ export function createMcpServer(call: ApiCall, opts: { canApply: boolean }): Mcp
     },
     async ({ id, all_steps }) => {
       const t = await call(`/sessions/${encodeURIComponent(id)}?days=365`);
-      type Step = { seq: number; kind: string; name: string; input: string; output: string; isError: boolean; durationMs: number | null; at: string };
       const steps: Step[] = t.steps;
-      const tool = (s: Step) => s.kind === "tool" || s.kind === "subagent";
-      const failed = steps.filter((s) => tool(s) && s.isError);
+      const findings: Finding[] = t.findings;
+      const issues: Record<string, { cause?: string; what?: string; sessions?: number; fix?: string | null } | undefined> = t.issues;
+      const failed = steps.filter((s) => isToolStep(s) && s.isError);
       const issueAt = new Map<number, string>();
-      for (const f of t.findings as { key: string; seq: number; title: string }[]) issueAt.set(f.seq, t.issues[f.key]?.what ?? f.title);
-      const byCause = new Map<string, { issue: string; firstStep: number; sessions: number; fix: string | null }>();
-      for (const f of t.findings as { key: string; seq: number; title: string }[]) {
-        const ref = t.issues[f.key] ?? {};
-        const k = ref.cause ?? f.key;
-        if (!byCause.has(k)) byCause.set(k, { issue: ref.what ?? f.title, firstStep: f.seq, sessions: ref.sessions ?? 1, fix: ref.fix ?? null });
-      }
-      const s = t.session;
+      for (const f of findings) issueAt.set(f.seq, issues[f.key]?.what ?? f.title);
+      const s: Session = t.session;
       const brief = (x: Step) => ({ step: x.seq, kind: x.kind, name: x.name, input: clip(x.input, all_steps ? 300 : 1200), ...(x.isError ? { error: clip(x.output, 1500) } : all_steps ? { output: clip(x.output, 200) } : {}), ...(issueAt.has(x.seq) ? { issue: issueAt.get(x.seq) } : {}) });
       return text({
         id: s.id,
@@ -241,8 +232,11 @@ export function createMcpServer(call: ApiCall, opts: { canApply: boolean }): Mcp
         steps: steps.length,
         toolCalls: s.toolCalls,
         failedCalls: failed.length,
-        loadedAtStart: [...new Set((t.memory as { source: string; ref: string }[]).filter((m) => m.source === "instructions").map((m) => m.ref))],
-        issues: [...byCause.values()],
+        loadedAtStart: startFiles(t.memory as MemoryEvent[]).map((m) => m.ref),
+        issues: findingsByCause(findings, issues).map((f) => {
+          const ref = issues[f.key] ?? {};
+          return { issue: ref.what ?? f.title, firstStep: f.seq, sessions: ref.sessions ?? 1, fix: ref.fix ?? null };
+        }),
         ...(all_steps ? { allSteps: steps.slice(0, 600).map(brief) } : { failures: failed.slice(0, 40).map(brief) }),
       });
     },
@@ -369,15 +363,15 @@ export function createMcpServer(call: ApiCall, opts: { canApply: boolean }): Mcp
       annotations: { readOnlyHint: true },
     },
     async () => {
-      const list: { id: string; title: string; endedAt: string }[] = await call("/sessions?limit=2000");
+      const list: Session[] = await call("/sessions?kind=routines&limit=2000");
       const by = new Map<string, { sessionId: string; runs: number; newestRunEnded: string }>();
       for (const s of list) {
-        const m = /^routine-(.+)-\d{17}$/.exec(s.id);
-        if (!m) continue;
-        const e = by.get(m[1]) ?? { sessionId: m[1], runs: 0, newestRunEnded: "" };
+        const sessionId = routineSessionOf(s.id);
+        if (!sessionId) continue;
+        const e = by.get(sessionId) ?? { sessionId, runs: 0, newestRunEnded: "" };
         e.runs++;
         if (s.endedAt > e.newestRunEnded) e.newestRunEnded = s.endedAt;
-        by.set(m[1], e);
+        by.set(sessionId, e);
       }
       return text({ routineSessions: [...by.values()] });
     },
@@ -409,7 +403,6 @@ export function createMcpServer(call: ApiCall, opts: { canApply: boolean }): Mcp
         pages = [...pages, readFileSync(path, "utf8")];
       }
       if (pages.length === 0) throw new Error("Pass the run log as `log` or `path`.");
-      const { parseRoutineRuns } = await import("../core/parse-routine.ts");
       const me = await call("/me");
       const runs = parseRoutineRuns(pages, { routine, sessionId: session_id, person: me.person, fires });
       let issues = 0;

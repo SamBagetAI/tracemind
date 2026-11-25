@@ -66,25 +66,25 @@ describe.each(dbs)("Store on %s", (_, open) => {
     await s.saveTrace("w", trace());
     const issue = (await s.issues("w")).find((i) => i.kind === "tool_error")!;
     await s.setIssueStatus("w", issue.key, "resolved", "Ada", "fixed the import");
-    expect((await s.issue("w", issue.key))?.issue.status).toBe("resolved");
+    expect((await s.issue("w", issue.key))?.status).toBe("resolved");
 
     // A session from before the fix does not reopen it…
     await s.saveTrace("w", later(trace(), "old", "2000-01-01T00:00:00.000Z"));
-    expect((await s.issue("w", issue.key))?.issue.status).toBe("resolved");
+    expect((await s.issue("w", issue.key))?.status).toBe("resolved");
 
     // …one after it does.
     await s.saveTrace("w", later(trace(), "new", "2999-01-01T00:00:00.000Z"));
     const again = await s.issue("w", issue.key);
-    expect(again?.issue.status).toBe("open");
-    expect(again?.issue.reopened).toBe(true);
-    expect(again?.issue.sessions).toBe(3);
+    expect(again?.status).toBe("open");
+    expect(again?.reopened).toBe(true);
+    expect(again?.sessions).toBe(3);
   });
 
   it("resolves an issue on its own once sessions in its project stop having it, and reopens it if it comes back", async () => {
     const s = await store();
     await s.saveTrace("w", later(trace(), "bad", new Date(Date.now() - 20 * 86400_000).toISOString()));
     const key = (await s.issues("w")).find((i) => i.kind === "tool_error")!.key;
-    const status = async () => (await s.issue("w", key))!.issue;
+    const status = async () => (await s.issue("w", key))!;
 
     // Quiet sessions in another project say nothing about this one.
     for (let i = 0; i < QUIET_SESSIONS; i++) await s.saveTrace("w", clean(trace(), `elsewhere-${i}`, -19 + i, "/code/other"));
@@ -110,9 +110,9 @@ describe.each(dbs)("Store on %s", (_, open) => {
     const key = (await s.issues("w")).find((i) => i.kind === "tool_error")!.key;
     const minutes = (m: number) => (m * 60_000) / 86400_000 - 20;
     for (let i = 1; i <= QUIET_SESSIONS + 2; i++) await s.saveTrace("w", clean(trace(), `burst-${i}`, minutes(i * 3)));
-    expect((await s.issue("w", key))!.issue.status).toBe("open");
+    expect((await s.issue("w", key))!.status).toBe("open");
     await s.saveTrace("w", clean(trace(), "next-day", -18));
-    expect((await s.issue("w", key))!.issue.status).toBe("resolved");
+    expect((await s.issue("w", key))!.status).toBe("resolved");
   });
 
   it("names a routine by its whole name, slash included", async () => {
@@ -122,7 +122,7 @@ describe.each(dbs)("Store on %s", (_, open) => {
     await s.saveTrace("w", { ...bad, session: { ...bad.session, project: routine } });
     const key = (await s.issues("w")).find((i) => i.kind === "tool_error")!.key;
     for (let i = 0; i < QUIET_SESSIONS; i++) await s.saveTrace("w", clean(trace(), `quiet-${i}`, -15 + i, routine));
-    expect((await s.issue("w", key))!.issue.note).toContain("in Envoi vague BFC + LinkedIn 5/5 since");
+    expect((await s.issue("w", key))!.note).toContain("in Envoi vague BFC + LinkedIn 5/5 since");
   });
 
   it("reopens an issue it resolved when a session saved late had it in the quiet stretch", async () => {
@@ -130,10 +130,10 @@ describe.each(dbs)("Store on %s", (_, open) => {
     await s.saveTrace("w", later(trace(), "bad", new Date(Date.now() - 20 * 86400_000).toISOString()));
     const key = (await s.issues("w")).find((i) => i.kind === "tool_error")!.key;
     for (let i = 0; i < QUIET_SESSIONS; i++) await s.saveTrace("w", clean(trace(), `quiet-${i}`, -15 + i));
-    expect((await s.issue("w", key))!.issue.status).toBe("resolved");
+    expect((await s.issue("w", key))!.status).toBe("resolved");
     await s.saveTrace("w", later(trace(), "late", new Date(Date.now() - 12.5 * 86400_000).toISOString()));
     // Open again, but not "back after it was resolved": it never went away.
-    expect((await s.issue("w", key))!.issue).toMatchObject({ status: "open", reopened: false });
+    expect((await s.issue("w", key))!).toMatchObject({ status: "open", reopened: false });
   });
 
   it("leaves an issue someone reopened by hand open until new quiet sessions come in", async () => {
@@ -143,9 +143,9 @@ describe.each(dbs)("Store on %s", (_, open) => {
     for (let i = 0; i < QUIET_SESSIONS; i++) await s.saveTrace("w", clean(trace(), `quiet-${i}`, -15 + i));
     await s.setIssueStatus("w", key, "open", "Ada", "");
     await s.saveTrace("w", clean(trace(), "one-more", -1));
-    expect((await s.issue("w", key))!.issue.status).toBe("open");
+    expect((await s.issue("w", key))!.status).toBe("open");
     for (let i = 0; i < QUIET_SESSIONS; i++) await s.saveTrace("w", clean(trace(), `after-${i}`, 1 + i));
-    expect((await s.issue("w", key))!.issue).toMatchObject({ status: "resolved", resolvedBy: AUTO_RESOLVER });
+    expect((await s.issue("w", key))!).toMatchObject({ status: "resolved", resolvedBy: AUTO_RESOLVER });
   });
 
   it("sums up sessions, tools and memory", async () => {
@@ -163,7 +163,10 @@ describe.each(dbs)("Store on %s", (_, open) => {
     const mem = await s.memory("w", since);
     const claude = mem.find((m) => m.ref === "/work/shop/CLAUDE.md" && m.source === "instructions")!;
     expect(claude.sessions).toBe(1);
-    expect(await s.projects("w")).toEqual(["/work/shop"]);
+    expect((await s.sessions("w")).map((x) => x.project)).toEqual(["/work/shop"]);
+    // The period before: the same sums over [since, until).
+    expect(await s.totals("w", since, "9999")).toEqual({ sessions: 1, withIssues: 1, activeMs: o.activeMs, toolErrors: 2, outputTokens: o.outputTokens, costUsd: o.costUsd });
+    expect((await s.totals("w", "2000", since)).sessions).toBe(0);
   });
 
   it("numbers issues per workspace and numbers old databases' issues when it migrates", async () => {
@@ -176,6 +179,17 @@ describe.each(dbs)("Store on %s", (_, open) => {
     await s.db.run("UPDATE issues SET num = NULL WHERE workspace = ?", ["w"]);
     await s.migrate();
     expect((await s.issues("w")).map((i) => i.num).sort()).toEqual([1, 2, 3, 4]);
+  });
+
+  it("places a session among the newest, in the window when it started in it, else among all", async () => {
+    const s = await store();
+    await s.saveTrace("w", later(trace(), "old", "2020-01-01T00:00:00.000Z"));
+    await s.saveTrace("w", later(trace(), "mid", "2999-01-01T00:00:00.000Z"));
+    await s.saveTrace("w", later(trace(), "new", "2999-01-02T00:00:00.000Z"));
+    const since = "2026-01-01T00:00:00.000Z";
+    expect(await s.neighbours("w", "mid", since)).toEqual({ newer: "new", older: null, index: 1, total: 2, scoped: true });
+    expect(await s.neighbours("w", "old", since)).toEqual({ newer: "mid", older: null, index: 2, total: 3, scoped: false });
+    expect(await s.neighbours("w", "nope", since)).toBeNull();
   });
 
   it("tracks what still needs pushing", async () => {

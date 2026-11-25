@@ -11,7 +11,7 @@ import { Loading } from "@/components/shell";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { api, type Preview, type Suggestion } from "@/lib/api";
+import { api, usePost, type Preview, type Suggestion } from "@/lib/api";
 import { plural, shortPath, when } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -89,18 +89,11 @@ export function ChangeBody({ s }: { s: Suggestion }) {
 
 function ApplyDialog({ s, open, onOpenChange, onApplied }: { s: Suggestion; open: boolean; onOpenChange: (o: boolean) => void; onApplied: () => void }) {
   const p = usePreview(s.id, open);
-  const [busy, setBusy] = useState(false);
+  const { busy, post } = usePost();
   const go = async () => {
-    setBusy(true);
-    try {
-      const r = await api<{ file: string }>(`/suggestions/${s.id}/apply`, { method: "POST", body: "{}" });
-      toast.success(`Applied to ${shortPath(r.file)}.`);
+    if (await post<{ file: string }>(`/suggestions/${s.id}/apply`, {}, (r) => `Applied to ${shortPath(r.file)}.`)) {
       onOpenChange(false);
       onApplied();
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setBusy(false);
     }
   };
   const isRule = s.action.type === "rule";
@@ -202,21 +195,12 @@ export function AppliedLine({ s }: { s: Suggestion }) {
 /** The buttons for a change: one main button (Apply or Copy prompt), Dismiss, or Undo once applied. */
 export function ChangeActions({ s, canApply, onChange, className }: { s: Suggestion; canApply: boolean; onChange: () => void; className?: string }) {
   const [dialog, setDialog] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const { busy, post: send } = usePost();
   const a = s.action;
   const post = async (verb: string, done: string) => {
-    setBusy(true);
-    try {
-      await api(`/suggestions/${s.id}/${verb}`, { method: "POST", body: "{}" });
-      toast.success(done);
-      onChange();
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
+    if (await send(`/suggestions/${s.id}/${verb}`, {}, done)) onChange();
   };
-  const applicable = a.type === "rule" || a.type === "routine";
+  const applicable = s.fixable;
   if (s.status === "applied") {
     return applicable && canApply ? (
       <Button variant="outline" size="sm" className={cn("h-8", className)} disabled={busy} onClick={() => post("undo", "Undone.")}>
@@ -249,10 +233,6 @@ export function ChangeActions({ s, canApply, onChange, className }: { s: Suggest
   );
 }
 
-/**
- * A fix in one line, for pages other than Fixes: what it is, how many sessions it would help, and a
- * link to its full card on Fixes, where it is written out and applied. Only the Fixes page shows the card.
- */
 /** Where a fix's change goes, in a few words. */
 function FixKind({ s }: { s: Suggestion }) {
   const a = s.action;
@@ -265,6 +245,10 @@ function FixKind({ s }: { s: Suggestion }) {
   return <>A habit</>;
 }
 
+/**
+ * A fix in one line, for pages other than Fixes: what it is, how many sessions it would help, and a
+ * link to its full card on Fixes, where it is written out and applied. Only the Fixes page shows the card.
+ */
 export function FixLine({ s, issues }: { s: Suggestion; issues?: boolean }) {
   const applied = s.status === "applied";
   return (

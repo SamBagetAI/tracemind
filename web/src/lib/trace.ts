@@ -6,7 +6,11 @@
  * - In focus mode, three or more steps in a row that went fine (tool calls and the agent's replies)
  *   and are not next to a failure fold into one row that says what they were ("6 steps went fine: 4 Bash, 2 Reply").
  */
-import type { Finding, IssueRef, MemoryEvent, Step, Trace } from "./api";
+import { errorLine } from "../../../src/core/issues";
+import { findingsByCause } from "../../../src/core/describe";
+import type { Finding, IssueRef, Step, Trace } from "./api";
+
+export { findingsByCause, startFiles } from "../../../src/core/describe";
 
 export type Row =
   | { type: "step"; step: Step; finding?: Finding; issue?: IssueRef }
@@ -14,17 +18,6 @@ export type Row =
   | { type: "fold"; steps: Step[] };
 
 const isTool = (s: Step) => s.kind === "tool" || s.kind === "subagent";
-
-/** The first line of an error, which is what tells two failures apart. */
-export function errorLine(output: string): string {
-  return (
-    output
-      .replace(/<\/?tool_use_error>/g, "")
-      .split("\n")
-      .map((l) => l.trim())
-      .find((l) => l && !/^exit code \d+$/i.test(l)) ?? output.split("\n")[0] ?? ""
-  );
-}
 
 /**
  * The part of an error worth reading. Refusals from Claude Code's auto-mode classifier are mostly
@@ -136,16 +129,6 @@ export function longestFailureRun(steps: Step[]): Run | null {
   return best;
 }
 
-/** A session's findings, one per cause (the first step that hit it): what the session's issues are. */
-export function findingsByCause(trace: Pick<Trace, "findings" | "issues">): Finding[] {
-  return [...new Map(trace.findings.map((f) => [trace.issues[f.key]?.cause ?? f.key, f])).values()];
-}
-
-/** The instruction files a session loaded at its start, each once. */
-export function startFiles(memory: MemoryEvent[]): MemoryEvent[] {
-  return [...new Map(memory.filter((m) => m.source === "instructions").map((m) => [m.ref, m])).values()];
-}
-
 /** One sentence of facts about the session: no guessing at causes. */
 export function diagnosis(trace: Pick<Trace, "session" | "steps" | "findings" | "issues">): { lead: string; rest: string } {
   const s = trace.session;
@@ -158,7 +141,7 @@ export function diagnosis(trace: Pick<Trace, "session" | "steps" | "findings" | 
   const run = longestFailureRun(trace.steps);
   if (run && run.count >= 3) parts.push(`${run.name} failed ${run.count} times in a row, at steps ${run.from}–${run.to}.`);
   // Counted by cause, as the Issues list and the side panel count them: two variants of one cause are one issue.
-  const causes = findingsByCause(trace).map((f) => trace.issues[f.key]?.sessions ?? 0);
+  const causes = findingsByCause(trace.findings, trace.issues).map((f) => trace.issues[f.key]?.sessions ?? 0);
   const recurring = causes.filter((n) => n > 1).length;
   if (recurring) parts.push(recurring === causes.length ? (causes.length === 1 ? "Its one issue happened in other sessions too." : `All ${causes.length} of its issues happened in other sessions too.`) : `${recurring} of its ${causes.length} issues happened in other sessions too.`);
   else if (causes.length) parts.push(causes.length === 1 ? "Its one issue is new." : `All ${causes.length} of its issues are new.`);

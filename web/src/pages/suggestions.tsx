@@ -4,18 +4,18 @@
  * meant to stop, and has one main button: Apply or Copy prompt.
  */
 import { ChevronRight } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link, useLocation } from "react-router";
-import { toast } from "sonner";
 import { AppliedLine, ChangeActions, ChangeBody } from "@/components/change";
 import { SectionTitle } from "@/components/marks";
 import { Empty, Failed, Loading, Page } from "@/components/shell";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { api, useApi, type Suggestion, type Viewer } from "@/lib/api";
-import { plural, projectName, shortPath } from "@/lib/format";
+import { usePost, useApi, type Suggestion } from "@/lib/api";
+import { plural, projectName } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { useViewer } from "@/lib/viewer";
 import { useWindow } from "@/lib/window";
 
 /** Sessions in the window, the cause it is about, and where it was seen. */
@@ -96,13 +96,23 @@ function Group({ title, note, children }: { title: ReactNode; note?: ReactNode; 
   );
 }
 
+/** The sections after the instruction files, in order. */
+const SECTIONS: { kind: Suggestion["kind"]; title: string; note?: string }[] = [
+  { kind: "routine", title: "Claude Code settings" },
+  { kind: "connect", title: "Connectors" },
+  { kind: "trim", title: "Instruction file size" },
+  { kind: "investigate", title: "Needs investigation", note: "no rule covers these yet" },
+  { kind: "tip", title: "Habits" },
+];
+
 export function SuggestionsPage() {
   const { days } = useWindow();
   const list = useApi<Suggestion[]>(`/suggestions?days=${days}`);
-  const me = useApi<Viewer>("/me");
+  const me = useViewer();
+  const { busy, post } = usePost();
   const { hash } = useLocation();
   const target = hash.slice(1);
-  const canApply = me.data?.mode === "local";
+  const canApply = me?.mode === "local";
   const [tab, setTab] = useState("review");
 
   // A link to one fix (/fixes#id) opens the tab it is in, then scrolls to it.
@@ -118,19 +128,10 @@ export function SuggestionsPage() {
   const applied = all.filter((s) => s.status === "applied");
   const dismissed = all.filter((s) => s.status === "dismissed");
 
-  const groups = useMemo(() => {
-    const rules = new Map<string, Suggestion[]>();
-    for (const s of open) if (s.action.type === "rule") rules.set(s.action.file, [...(rules.get(s.action.file) ?? []), s]);
-    const isGlobal = (l: Suggestion[]) => l[0].action.type === "rule" && l[0].action.scope === "global";
-    return {
-      rules: [...rules.entries()].sort(([, a], [, b]) => Number(isGlobal(b)) - Number(isGlobal(a))),
-      routine: open.filter((s) => s.kind === "routine"),
-      connect: open.filter((s) => s.kind === "connect"),
-      trim: open.filter((s) => s.kind === "trim"),
-      investigate: open.filter((s) => s.kind === "investigate"),
-      tips: open.filter((s) => s.kind === "tip"),
-    };
-  }, [open]);
+  const byFile = new Map<string, Suggestion[]>();
+  for (const s of open) if (s.action.type === "rule") byFile.set(s.action.file, [...(byFile.get(s.action.file) ?? []), s]);
+  const isGlobal = (l: Suggestion[]) => l[0].action.type === "rule" && l[0].action.scope === "global";
+  const rules = [...byFile.entries()].sort(([, a], [, b]) => Number(isGlobal(b)) - Number(isGlobal(a)));
 
   const rowProps = { canApply, onChange: list.reload, days };
 
@@ -149,7 +150,7 @@ export function SuggestionsPage() {
           {tab === "review" && (<div>
             <div>
               {open.length === 0 && <Empty>Nothing to review in the last {days} days. A longer window may show more.</Empty>}
-              {groups.rules.map(([file, items]) => (
+              {rules.map(([file, items]) => (
                 <Group
                   key={file}
                   title={items[0].action.type === "rule" && items[0].action.scope === "global" ? "Your global CLAUDE.md" : `${projectName(file.split("/").slice(0, -1).join("/"))} · ${file.split("/").pop()}`}
@@ -158,15 +159,11 @@ export function SuggestionsPage() {
                   {items.map((s) => <Row key={s.id} s={s} {...rowProps} highlight={s.id === target} />)}
                 </Group>
               ))}
-              {groups.routine.length > 0 && <Group title="Claude Code settings">{groups.routine.map((s) => <Row key={s.id} s={s} {...rowProps} highlight={s.id === target} />)}</Group>}
-              {groups.connect.length > 0 && <Group title="Connectors">{groups.connect.map((s) => <Row key={s.id} s={s} {...rowProps} highlight={s.id === target} />)}</Group>}
-              {groups.trim.length > 0 && <Group title="Instruction file size">{groups.trim.map((s) => <Row key={s.id} s={s} {...rowProps} highlight={s.id === target} />)}</Group>}
-              {groups.investigate.length > 0 && (
-                <Group title="Needs investigation" note="no rule covers these yet">
-                  {groups.investigate.map((s) => <InvestigateRow key={s.id} s={s} {...rowProps} highlight={s.id === target} />)}
-                </Group>
-              )}
-              {groups.tips.length > 0 && <Group title="Habits">{groups.tips.map((s) => <Row key={s.id} s={s} {...rowProps} highlight={s.id === target} />)}</Group>}
+              {SECTIONS.map(({ kind, title, note }) => {
+                const items = open.filter((s) => s.kind === kind);
+                const R = kind === "investigate" ? InvestigateRow : Row;
+                return items.length > 0 && <Group key={kind} title={title} note={note}>{items.map((s) => <R key={s.id} s={s} {...rowProps} highlight={s.id === target} />)}</Group>;
+              })}
             </div>
           </div>)}
 
@@ -196,7 +193,7 @@ export function SuggestionsPage() {
                 {dismissed.map((s) => (
                   <li key={s.id} className="flex items-center justify-between gap-3 px-1 py-2 sm:px-2">
                     <span className="min-w-0 truncate text-muted-foreground">{s.title}</span>
-                    <Button variant="ghost" size="sm" className="h-7 shrink-0" onClick={() => api(`/suggestions/${s.id}/restore`, { method: "POST", body: "{}" }).then(list.reload).catch((e) => toast.error((e as Error).message))}>
+                    <Button variant="ghost" size="sm" className="h-7 shrink-0" disabled={busy} onClick={async () => { if (await post(`/suggestions/${s.id}/restore`, {})) list.reload(); }}>
                       Bring back
                     </Button>
                   </li>

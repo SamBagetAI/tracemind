@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeIssue } from "../src/core/describe.ts";
+import { describeIssue, findingsByCause, startFiles } from "../src/core/describe.ts";
 import { findIssues, program, signature } from "../src/core/issues.ts";
 import { describeInput, parseClaudeSession, shortToolName } from "../src/core/parse-claude.ts";
 import { clip, redact, redactCounted } from "../src/core/redact.ts";
@@ -182,6 +182,13 @@ describe("issues", () => {
 });
 
 describe("helpers", () => {
+  it("keeps a session's first finding per cause, and each start file once", () => {
+    const findings = [{ key: "a", seq: 2 }, { key: "b", seq: 5 }, { key: "c", seq: 7 }];
+    expect(findingsByCause(findings, { a: { cause: "X" }, b: { cause: "X" } })).toEqual([{ key: "a", seq: 2 }, { key: "c", seq: 7 }]);
+    const memory = [{ source: "instructions", ref: "/a/CLAUDE.md" }, { source: "file", ref: "/a/x.ts" }, { source: "instructions", ref: "/a/CLAUDE.md" }];
+    expect(startFiles(memory).map((m) => m.ref)).toEqual(["/a/CLAUDE.md"]);
+  });
+
   it("shortens MCP tool names", () => {
     expect(shortToolName("mcp__github__create_issue")).toBe("github/create_issue");
     expect(shortToolName("mcp__1e7812ba-40d4-4812-a439-8fed59ebd7f6__harness_hub_search")).toBe("harness_hub_search");

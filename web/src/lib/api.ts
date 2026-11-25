@@ -1,26 +1,12 @@
 /** Types the API returns and a small hook to load them. */
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 
-export type Outcome = "ok" | "error" | "interrupted" | "running";
-export type IssueKind = "tool_error" | "permission_denied" | "step_repetition" | "interrupted";
+import type { Finding, IssueKind, MemoryEvent, Session as CoreSession, Step } from "../../../src/core/types";
 
-export type Session = {
-  id: string;
-  agent: string;
-  person: string;
-  project: string;
-  title: string;
-  gitBranch: string | null;
-  model: string | null;
-  agentVersion: string | null;
-  startedAt: string;
-  endedAt: string;
-  outcome: Outcome;
-  stepCount: number;
-  toolCalls: number;
-  toolErrors: number;
-  inputTokens: number;
-  outputTokens: number;
+export type { Finding, IssueKind, MemoryEvent, MemorySource, Outcome, Step, StepKind } from "../../../src/core/types";
+
+export type Session = CoreSession & {
   issueCount: number;
   /** Time spent working (gaps between steps, each up to 15 minutes). */
   activeMs: number;
@@ -34,20 +20,6 @@ export type Session = {
 
 export type SessionIssue = { what: string; seq: number; key: string; named?: boolean };
 
-export type Step = {
-  seq: number;
-  kind: "prompt" | "reply" | "tool" | "subagent" | "compact" | "interrupt";
-  name: string;
-  input: string;
-  output: string;
-  isError: boolean;
-  at: string;
-  durationMs: number | null;
-  sidechain: boolean;
-};
-
-export type MemoryEvent = { seq: number; source: "instructions" | "file" | "skill" | "mcp"; op: "read" | "write"; ref: string; preview: string; at: string };
-export type Finding = { key: string; kind: IssueKind; title: string; seq: number };
 /** An issue a session hit, with its cause's session count (all variants) over the window. */
 export type IssueRef = { status: "open" | "resolved"; num: number; sessions: number; cause?: string; what?: string; fix?: "ready" | "applied" | null; fixAt?: string | null };
 
@@ -59,6 +31,8 @@ export type Trace = {
   issues: Record<string, IssueRef>;
   /** The window the issue counts cover, or null for all time (the session is older than the window). */
   issueWindow?: number | null;
+  /** Its neighbours among the person's sessions of the same kind, newest first, and where it sits among them. */
+  nav: { newer: string | null; older: string | null; index: number; total: number } | null;
 };
 
 export type Issue = {
@@ -123,7 +97,8 @@ export type Overview = {
   openIssues: number;
   /** The period of the same length just before the window. */
   previous: { sessions: number; withIssues: number; activeMs: number; toolErrors: number; outputTokens: number; costUsd: number };
-  strip: { id: string; title: string; startedAt: string; issues: number }[];
+  /** Runs a person started (a routine replied to); the rest fired on their own. */
+  replies: number;
 };
 
 export type Suggestion = {
@@ -140,6 +115,8 @@ export type Suggestion = {
     | { type: "routine"; event: string; command: string }
     | { type: "prompt"; text: string }
     | { type: "tip" };
+  /** Whether Tracemind can apply it (a rule or a routine); the others are for a person to act on. */
+  fixable: boolean;
   status: "open" | "applied" | "dismissed";
   at: string | null;
   effect: { before: { sessions: number; hit: number }; since: { sessions: number; hit: number } } | null;
@@ -192,4 +169,27 @@ export function useApi<T>(path: string | null): Loaded<T> {
     };
   }, [path, tick]);
   return { ...state, reload };
+}
+
+/**
+ * POSTs `body` to `path`; while it runs `busy` is true. Toasts `ok` if given (or the error) and returns
+ * the reply, or null on failure. A 401 goes to sign-in, as useApi does.
+ */
+export function usePost() {
+  const [busy, setBusy] = useState(false);
+  const post = useCallback(async <T = unknown,>(path: string, body: unknown, ok?: string | ((r: T) => string)): Promise<T | null> => {
+    setBusy(true);
+    try {
+      const r = await api<T>(path, { method: "POST", body: JSON.stringify(body ?? {}) });
+      if (ok) toast.success(typeof ok === "function" ? ok(r) : ok);
+      return r;
+    } catch (e) {
+      if (e instanceof Unauthorized) window.location.assign("/login");
+      else toast.error((e as Error).message);
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+  return { busy, post };
 }

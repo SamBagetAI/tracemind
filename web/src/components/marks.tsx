@@ -1,6 +1,6 @@
 /**
  * Small data marks. Each one is readable on its own: a heat strip whose cells say their day and
- * count, a failure bar scaled to the busiest row with its number beside it, a clean tick.
+ * count, a clean tick.
  */
 import { Check, Wrench } from "lucide-react";
 import { dayLabel, plural } from "@/lib/format";

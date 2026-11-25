@@ -4,8 +4,8 @@
  * src/core/describe.ts, which the server uses too.
  */
 export { KIND, causeKey, describeIssue, projectName, toolLabel, topTools } from "../../../src/core/describe";
+export { DAY, daysAgo } from "../../../src/core/time";
 
-const DAY = 86400000;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /** "just now", "5m ago", "3h ago", "2d ago", then "18 Oct" (with the year when it is not this year). */

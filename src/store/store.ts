@@ -1,16 +1,27 @@
 /** Reading and writing traces, issues and tokens. All queries are scoped to one workspace. */
 import { createHash, randomBytes } from "node:crypto";
-import { ROUTINE_AGENT } from "../core/parse-routine.ts";
+import { ROUTINE_AGENT, routineRunId, routineSessionOf } from "../core/parse-routine.ts";
 import { projectName } from "../core/describe.ts";
 import { redact } from "../core/redact.ts";
+import { DAY } from "../core/time.ts";
 import type { Finding, IssueKind, MemoryEvent, Outcome, Session, Step, Trace, Brief } from "../core/types.ts";
 import type { Db, Row } from "./db.ts";
 import { SCHEMA } from "./schema.ts";
 
 const CHUNK = 200;
 
-const n = (v: unknown): number => (v == null ? 0 : Number(v));
+/** A number from a row's column, 0 for NULL (Postgres returns BIGINT as a string). */
+export const n = (v: unknown): number => (v == null ? 0 : Number(v));
 const now = () => new Date().toISOString();
+
+/** The tables that hold a session's rows, besides `sessions` itself. */
+const SESSION_TABLES = ["steps", "memory", "findings"] as const;
+
+/** Deletes a session and everything saved with it. */
+async function deleteSession(db: Db, ws: string, id: string) {
+  for (const t of SESSION_TABLES) await db.run(`DELETE FROM ${t} WHERE workspace = ? AND session_id = ?`, [ws, id]);
+  await db.run("DELETE FROM sessions WHERE workspace = ? AND id = ?", [ws, id]);
+}
 
 async function insertMany(db: Db, table: string, cols: string[], rows: unknown[][]) {
   for (let i = 0; i < rows.length; i += CHUNK) {
@@ -99,7 +110,7 @@ export { ROUTINE_AGENT };
 /** An open issue is resolved by Tracemind once this many sessions in its projects ran without it. */
 export const QUIET_SESSIONS = 5;
 /** …and the last of them ended at least this long after it was last seen. */
-const QUIET_MS = 86_400_000;
+const QUIET_MS = DAY;
 /** Who resolved an issue that stopped happening, as the issue page shows it. */
 export const AUTO_RESOLVER = "Tracemind";
 /** The SQL that keeps only a person's sessions or only routine runs (nothing for both), and its parameter. */
@@ -136,25 +147,21 @@ export class Store {
     const runs = await this.db.all<Row>("SELECT workspace, id, ended_at, step_count FROM sessions WHERE agent = ? ORDER BY step_count DESC", [ROUTINE_AGENT]);
     const moves = runs
       .map((r) => {
-        const m = /^(routine-.+)-\d{17}$/.exec(String(r.id));
-        return m ? { ws: String(r.workspace), id: String(r.id), next: `${m[1]}-${String(r.ended_at).replace(/[^0-9]/g, "").slice(0, 17)}` } : null;
+        const session = routineSessionOf(String(r.id));
+        return session ? { ws: String(r.workspace), id: String(r.id), next: routineRunId(session, String(r.ended_at)) } : null;
       })
       .filter((x): x is { ws: string; id: string; next: string } => !!x && x.next !== x.id);
     if (moves.length > 0) {
       await this.db.transaction(async (db) => {
         const rename = async (ws: string, from: string, to: string) => {
-          for (const t of ["steps", "memory", "findings"]) await db.run(`UPDATE ${t} SET session_id = ? WHERE workspace = ? AND session_id = ?`, [to, ws, from]);
+          for (const t of SESSION_TABLES) await db.run(`UPDATE ${t} SET session_id = ? WHERE workspace = ? AND session_id = ?`, [to, ws, from]);
           await db.run("UPDATE sessions SET id = ? WHERE workspace = ? AND id = ?", [to, ws, from]);
-        };
-        const drop = async (ws: string, id: string) => {
-          for (const t of ["steps", "memory", "findings"]) await db.run(`DELETE FROM ${t} WHERE workspace = ? AND session_id = ?`, [ws, id]);
-          await db.run("DELETE FROM sessions WHERE workspace = ? AND id = ?", [ws, id]);
         };
         for (const m of moves) await rename(m.ws, m.id, `moving-${m.id}`);
         const taken = new Set((await db.all<Row>("SELECT workspace, id FROM sessions")).map((r) => `${r.workspace} ${r.id}`));
         // Runs come with the most steps first, so a duplicate keeps its fuller copy.
         for (const m of moves) {
-          if (taken.has(`${m.ws} ${m.next}`)) await drop(m.ws, `moving-${m.id}`);
+          if (taken.has(`${m.ws} ${m.next}`)) await deleteSession(db, m.ws, `moving-${m.id}`);
           else {
             await rename(m.ws, `moving-${m.id}`, m.next);
             taken.add(`${m.ws} ${m.next}`);
@@ -199,10 +206,7 @@ export class Store {
         "SELECT pushed_at FROM sessions WHERE workspace = ? AND id = ?",
         [ws, s.id],
       );
-      for (const t of ["steps", "memory", "findings"]) {
-        await db.run(`DELETE FROM ${t} WHERE workspace = ? AND session_id = ?`, [ws, s.id]);
-      }
-      await db.run("DELETE FROM sessions WHERE workspace = ? AND id = ?", [ws, s.id]);
+      await deleteSession(db, ws, s.id);
       await insertMany(
         db,
         "sessions",
@@ -295,10 +299,9 @@ export class Store {
     });
   }
 
-
-  /** Opens an issue the first time it is seen, and reopens a resolved one that is seen again after it was resolved. */
   /**
-   * First seen is when the earliest session with the issue started, and last seen when the latest
+   * Opens an issue the first time it is seen, and reopens a resolved one that is seen again after it
+   * was resolved. First seen is when the earliest session with the issue started, and last seen when the latest
    * ended, whatever order sessions are saved in (an import goes by file date, not session date).
    */
   private async touchIssue(db: Db, ws: string, f: Finding, startedAt: string, at: string) {
@@ -329,22 +332,11 @@ export class Store {
   async sessions(ws: string, f: SessionFilter = {}) {
     const where = ["workspace = ?"];
     const params: unknown[] = [ws];
-    if (f.outcome) {
-      where.push("outcome = ?");
-      params.push(f.outcome);
-    }
-    if (f.project) {
-      where.push("project = ?");
-      params.push(f.project);
-    }
-    if (f.person) {
-      where.push("person = ?");
-      params.push(f.person);
-    }
-    if (f.kind) {
-      const k = kindClause(f.kind);
-      where.push(k.sql.replace(/^ AND /, ""));
-      params.push(...k.params);
+    for (const [col, v] of [["outcome", f.outcome], ["project", f.project], ["person", f.person]] as const) {
+      if (v) {
+        where.push(`${col} = ?`);
+        params.push(v);
+      }
     }
     if (f.since) {
       where.push("started_at >= ?");
@@ -354,13 +346,29 @@ export class Store {
       where.push("LOWER(title) LIKE ?");
       params.push(`%${f.q.toLowerCase()}%`);
     }
-    params.push(f.limit ?? 50, f.offset ?? 0);
+    const k = kindClause(f.kind);
+    params.push(...k.params, f.limit ?? 50, f.offset ?? 0);
     const rows = await this.db.all(
       `SELECT s.*, CAST((SELECT COUNT(*) FROM findings f WHERE f.workspace = s.workspace AND f.session_id = s.id) AS INTEGER) AS issue_count
-         FROM sessions s WHERE ${where.join(" AND ")} ORDER BY ended_at DESC LIMIT ? OFFSET ?`,
+         FROM sessions s WHERE ${where.join(" AND ")}${k.sql} ORDER BY ended_at DESC LIMIT ? OFFSET ?`,
       params,
     );
     return rows.map(toSession);
+  }
+
+  /**
+   * Where a session sits among the newest 1000 of any kind, newest first, for the session page's
+   * arrows: among those that started in the window when it did (`scoped`), else among all of them.
+   * Null when it is not among the newest 1000.
+   */
+  async neighbours(ws: string, id: string, since: string) {
+    const all = await this.db.all<Row>("SELECT id, started_at FROM sessions WHERE workspace = ? ORDER BY ended_at DESC, id DESC LIMIT 1000", [ws]);
+    const inWindow = all.filter((r) => String(r.started_at) >= since);
+    const scoped = inWindow.some((r) => String(r.id) === id);
+    const ids = (scoped ? inWindow : all).map((r) => String(r.id));
+    const i = ids.indexOf(id);
+    if (i < 0) return null;
+    return { newer: i > 0 ? ids[i - 1] : null, older: i < ids.length - 1 ? ids[i + 1] : null, index: i, total: ids.length, scoped };
   }
 
   async trace(ws: string, id: string): Promise<(Trace & { issues: Record<string, IssueRef> }) | null> {
@@ -414,41 +422,37 @@ export class Store {
   async overview(ws: string, since: string, kind?: SessionKind) {
     const k = kindClause(kind);
     const ks = kindClause(kind, "s.");
-    const [totals] = await this.db.all<Row>(
-      `SELECT CAST(COUNT(*) AS INTEGER) AS sessions,
-              CAST(COALESCE(SUM(CASE WHEN outcome = 'ok' THEN 1 ELSE 0 END), 0) AS INTEGER) AS ok,
-              CAST(COALESCE(SUM(CASE WHEN outcome = 'error' THEN 1 ELSE 0 END), 0) AS INTEGER) AS error,
-              CAST(COALESCE(SUM(CASE WHEN outcome = 'interrupted' THEN 1 ELSE 0 END), 0) AS INTEGER) AS interrupted,
-              CAST(COALESCE(SUM(tool_calls), 0) AS BIGINT) AS tool_calls,
-              CAST(COALESCE(SUM(tool_errors), 0) AS BIGINT) AS tool_errors,
-              CAST(COALESCE(SUM(input_tokens), 0) AS BIGINT) AS input_tokens,
-              CAST(COALESCE(SUM(output_tokens), 0) AS BIGINT) AS output_tokens,
-              CAST(COALESCE(SUM(active_ms), 0) AS BIGINT) AS active_ms,
-              COALESCE(SUM(cost_usd), 0) AS cost_usd
-         FROM sessions WHERE workspace = ? AND started_at >= ?${k.sql}`,
-      [ws, since, ...k.params],
-    );
-    const days = await this.db.all<Row>(
-      `SELECT SUBSTR(s.started_at, 1, 10) AS day, CAST(COUNT(*) AS INTEGER) AS sessions,
-              CAST(COALESCE(SUM(CASE WHEN EXISTS (SELECT 1 FROM findings f WHERE f.workspace = s.workspace AND f.session_id = s.id) THEN 1 ELSE 0 END), 0) AS INTEGER) AS failed
-         FROM sessions s WHERE s.workspace = ? AND s.started_at >= ?${ks.sql} GROUP BY SUBSTR(s.started_at, 1, 10) ORDER BY day`,
-      [ws, since, ...ks.params],
-    );
-    const strip = await this.db.all<Row>(
-      `SELECT s.id, s.title, s.started_at,
-              CAST((SELECT COUNT(*) FROM findings f WHERE f.workspace = s.workspace AND f.session_id = s.id) AS INTEGER) AS issue_count
-         FROM sessions s WHERE s.workspace = ? AND s.started_at >= ?${ks.sql} ORDER BY s.started_at LIMIT 1000`,
-      [ws, since, ...ks.params],
-    );
-    const [open] = await this.db.all<Row>(
-      "SELECT CAST(COUNT(*) AS INTEGER) AS open FROM issues WHERE workspace = ? AND status = 'open'",
-      [ws],
-    );
+    const [[totals], days, [open]] = await Promise.all([
+      this.db.all<Row>(
+        `SELECT CAST(COUNT(*) AS INTEGER) AS sessions,
+                CAST(COALESCE(SUM(CASE WHEN outcome = 'ok' THEN 1 ELSE 0 END), 0) AS INTEGER) AS ok,
+                CAST(COALESCE(SUM(CASE WHEN outcome = 'error' THEN 1 ELSE 0 END), 0) AS INTEGER) AS error,
+                CAST(COALESCE(SUM(CASE WHEN outcome = 'interrupted' THEN 1 ELSE 0 END), 0) AS INTEGER) AS interrupted,
+                CAST(COALESCE(SUM(CASE WHEN EXISTS (SELECT 1 FROM steps st WHERE st.workspace = sessions.workspace AND st.session_id = sessions.id AND st.seq = 1 AND st.kind = 'prompt') THEN 1 ELSE 0 END), 0) AS INTEGER) AS replies,
+                CAST(COALESCE(SUM(tool_calls), 0) AS BIGINT) AS tool_calls,
+                CAST(COALESCE(SUM(tool_errors), 0) AS BIGINT) AS tool_errors,
+                CAST(COALESCE(SUM(input_tokens), 0) AS BIGINT) AS input_tokens,
+                CAST(COALESCE(SUM(output_tokens), 0) AS BIGINT) AS output_tokens,
+                CAST(COALESCE(SUM(active_ms), 0) AS BIGINT) AS active_ms,
+                COALESCE(SUM(cost_usd), 0) AS cost_usd
+           FROM sessions WHERE workspace = ? AND started_at >= ?${k.sql}`,
+        [ws, since, ...k.params],
+      ),
+      this.db.all<Row>(
+        `SELECT SUBSTR(s.started_at, 1, 10) AS day, CAST(COUNT(*) AS INTEGER) AS sessions,
+                CAST(COALESCE(SUM(CASE WHEN EXISTS (SELECT 1 FROM findings f WHERE f.workspace = s.workspace AND f.session_id = s.id) THEN 1 ELSE 0 END), 0) AS INTEGER) AS failed
+           FROM sessions s WHERE s.workspace = ? AND s.started_at >= ?${ks.sql} GROUP BY SUBSTR(s.started_at, 1, 10) ORDER BY day`,
+        [ws, since, ...ks.params],
+      ),
+      this.db.all<Row>("SELECT CAST(COUNT(*) AS INTEGER) AS open FROM issues WHERE workspace = ? AND status = 'open'", [ws]),
+    ]);
     return {
       sessions: n(totals?.sessions),
       ok: n(totals?.ok),
       error: n(totals?.error),
       interrupted: n(totals?.interrupted),
+      /** Sessions whose first step is a person's prompt: for routine runs, the turns a person started (a reply), not the schedule. */
+      replies: n(totals?.replies),
       toolCalls: n(totals?.tool_calls),
       toolErrors: n(totals?.tool_errors),
       inputTokens: n(totals?.input_tokens),
@@ -459,28 +463,48 @@ export class Store {
       /** Sessions where at least one failure was found. */
       withIssues: days.reduce((sum, d) => sum + n(d.failed), 0),
       days: days.map((d) => ({ day: String(d.day), sessions: n(d.sessions), failed: n(d.failed) })),
-      /** One entry per session in the period, oldest first, for a strip of cells. */
-      strip: strip.map((r) => ({ id: String(r.id), title: String(r.title), startedAt: String(r.started_at), issues: n(r.issue_count) })),
     };
   }
 
-  async issues(ws: string, status?: "open" | "resolved") {
+  /** The sums the Diary compares with the period before: sessions that started in [since, until). */
+  async totals(ws: string, since: string, until: string, kind?: SessionKind) {
+    const k = kindClause(kind, "s.");
+    const [r] = await this.db.all<Row>(
+      `SELECT CAST(COUNT(*) AS INTEGER) AS sessions,
+              CAST(COALESCE(SUM(CASE WHEN EXISTS (SELECT 1 FROM findings f WHERE f.workspace = s.workspace AND f.session_id = s.id) THEN 1 ELSE 0 END), 0) AS INTEGER) AS with_issues,
+              CAST(COALESCE(SUM(s.active_ms), 0) AS BIGINT) AS active_ms,
+              CAST(COALESCE(SUM(s.tool_errors), 0) AS BIGINT) AS tool_errors,
+              CAST(COALESCE(SUM(s.output_tokens), 0) AS BIGINT) AS output_tokens,
+              COALESCE(SUM(s.cost_usd), 0) AS cost_usd
+         FROM sessions s WHERE s.workspace = ? AND s.started_at >= ? AND s.started_at < ?${k.sql}`,
+      [ws, since, until, ...k.params],
+    );
+    return {
+      sessions: n(r?.sessions),
+      withIssues: n(r?.with_issues),
+      activeMs: n(r?.active_ms),
+      toolErrors: n(r?.tool_errors),
+      outputTokens: n(r?.output_tokens),
+      costUsd: Number(r?.cost_usd ?? 0),
+    };
+  }
+
+  async issues(ws: string) {
     const rows = await this.db.all(
       `SELECT i.*, CAST((SELECT COUNT(*) FROM findings f WHERE f.workspace = i.workspace AND f.key = i.key) AS INTEGER) AS sessions
-         FROM issues i WHERE i.workspace = ? ${status ? "AND i.status = ?" : ""}
-        ORDER BY i.last_seen DESC`,
-      status ? [ws, status] : [ws],
+         FROM issues i WHERE i.workspace = ? ORDER BY i.last_seen DESC`,
+      [ws],
     );
     return rows.map(toIssue).sort((a, b) => (a.status === b.status ? 0 : a.status === "open" ? -1 : 1));
   }
 
-  async issue(ws: string, key: string) {
+  async issue(ws: string, key: string): Promise<IssueRow | null> {
     const rows = await this.db.all(
       `SELECT i.*, CAST((SELECT COUNT(*) FROM findings f WHERE f.workspace = i.workspace AND f.key = i.key) AS INTEGER) AS sessions
          FROM issues i WHERE i.workspace = ? AND i.key = ?`,
       [ws, key],
     );
-    return rows.length === 0 ? null : { issue: toIssue(rows[0]) };
+    return rows[0] ? toIssue(rows[0]) : null;
   }
 
   async setIssueStatus(ws: string, key: string, status: "open" | "resolved", by: string, note: string) {
@@ -562,11 +586,6 @@ export class Store {
       lastAt: String(r.last_at),
       lastWrite: (r.last_write as string) ?? null,
     }));
-  }
-
-  async projects(ws: string): Promise<string[]> {
-    const rows = await this.db.all<Row>("SELECT DISTINCT project FROM sessions WHERE workspace = ? ORDER BY project", [ws]);
-    return rows.map((r) => String(r.project));
   }
 
   /** Sessions saved or changed since they were last pushed to a server. */

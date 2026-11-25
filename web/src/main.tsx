@@ -13,6 +13,7 @@ import { SessionPage } from "@/pages/session";
 import { SessionsPage } from "@/pages/sessions";
 import { SuggestionsPage } from "@/pages/suggestions";
 import { ToolsPage } from "@/pages/tools";
+import { ViewerProvider } from "@/lib/viewer";
 import { WindowProvider } from "@/lib/window";
 import "./index.css";
 
@@ -26,6 +27,7 @@ function App() {
           <Route
             path="*"
             element={
+              <ViewerProvider>
               <Shell>
                 <Routes>
                   <Route path="/" element={<DiaryPage />} />
@@ -40,6 +42,7 @@ function App() {
                   <Route path="*" element={<Page title="Not found"><Empty>There is no page here.</Empty></Page>} />
                 </Routes>
               </Shell>
+              </ViewerProvider>
             }
           />
         </Routes>

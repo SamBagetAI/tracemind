@@ -7,7 +7,6 @@
 import { ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router";
-import { toast } from "sonner";
 import { FixLine } from "@/components/change";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { errorDetail } from "@/lib/trace";
@@ -18,26 +17,19 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { api, useApi, type CauseDetail } from "@/lib/api";
+import { usePost, useApi, type CauseDetail } from "@/lib/api";
 import { LEVEL_CLASS, dayLabel, describeIssue, fullDate, num, plural, projectName, sessionsLevel, toolLabel, when } from "@/lib/format";
 import { useWindow } from "@/lib/window";
 
 function Resolve({ k, status, variants, onDone }: { k: string; status: "open" | "resolved"; variants: number; onDone: () => void }) {
   const [note, setNote] = useState("");
   const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const { busy, post } = usePost();
   const send = async (next: "open" | "resolved") => {
-    setBusy(true);
-    try {
-      await api(`/cause/${encodeURIComponent(k)}/status`, { method: "POST", body: JSON.stringify({ status: next, note }) });
-      toast.success(next === "resolved" ? "Marked resolved. It comes back if it happens again." : "Reopened.");
+    if (await post(`/cause/${encodeURIComponent(k)}/status`, { status: next, note }, next === "resolved" ? "Marked resolved. It comes back if it happens again." : "Reopened.")) {
       setOpen(false);
       setNote("");
       onDone();
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setBusy(false);
     }
   };
   if (status === "resolved") return <Button variant="outline" size="sm" disabled={busy} onClick={() => send("open")}>Reopen</Button>;
@@ -141,7 +133,7 @@ export function IssuePage() {
     >
       <div>
         <section className="mb-10">
-          <SectionTitle>{!suggestion ? "Fix" : suggestion.status === "applied" ? "Fix applied" : suggestion.action.type === "rule" || suggestion.action.type === "routine" ? "Fix ready" : "To investigate"}</SectionTitle>
+          <SectionTitle>{!suggestion ? "Fix" : suggestion.status === "applied" ? "Fix applied" : suggestion.fixable ? "Fix ready" : "To investigate"}</SectionTitle>
           {suggestion ? (
             <>
               <FixLine s={suggestion} issues />
