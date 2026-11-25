@@ -1,8 +1,20 @@
-<p align="center"><img src="docs/mascot.svg" width="160" alt="Tracemind's slug, carrying its big brain and leaving a trace"></p>
+<p align="center"><img src="docs/mascot.svg" width="200" alt="Tracemind's slug, crawling with its big brain on its back and leaving a trace"></p>
 
 <h1 align="center">Tracemind</h1>
 
 <p align="center">See what goes wrong in your Claude Code sessions, and fix it.</p>
+
+<p align="center">
+  <a href="https://github.com/SamBagetAI/tracemind/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/SamBagetAI/tracemind/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-1a3ad8"></a>
+  <img alt="Claude Code" src="https://img.shields.io/badge/for-Claude%20Code-d97757?logo=claude&logoColor=white">
+  <a href="docs/guide.md#mcp-tracemind-inside-claude"><img alt="MCP" src="https://img.shields.io/badge/MCP-14%20tools-black"></a>
+  <img alt="Node" src="https://img.shields.io/badge/node-%E2%89%A522.13-5fa04e?logo=nodedotjs&logoColor=white">
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-3178c6?logo=typescript&logoColor=white">
+  <img alt="React" src="https://img.shields.io/badge/React-19.3-149eca?logo=react&logoColor=white">
+  <img alt="SQLite or Postgres" src="https://img.shields.io/badge/SQLite%20%7C%20Postgres-local%20or%20shared-336791?logo=postgresql&logoColor=white">
+  <img alt="pnpm" src="https://img.shields.io/badge/pnpm-10.33-f69220?logo=pnpm&logoColor=white">
+</p>
 
 ![The Diary: the month in one sentence, then the three sessions worth a look](docs/screenshot-diary.png)
 
