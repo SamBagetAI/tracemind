@@ -93,6 +93,11 @@ how often the problem happened before and since. Changes are only made from the 
 
 No model is involved: these are plain rules in `src/core/issues.ts`.
 
+An issue resolves itself once it stops: five sessions in the projects where it happened ran without
+it, the last of them at least a day after it was last seen. The issue page then says "Resolved by
+Tracemind" and why. If it happens again, it opens again and is marked as back. You can still resolve
+or reopen one by hand; after a reopen, Tracemind waits for five new quiet sessions.
+
 ## Privacy
 
 API keys, tokens, passwords, private keys, emails and card numbers are removed before anything

@@ -93,10 +93,22 @@ export type SessionFilter = { outcome?: string; project?: string; person?: strin
 /** Sessions a person worked in, or runs of a claude.ai routine (src/core/parse-routine.ts). */
 export type SessionKind = "sessions" | "routines";
 export const ROUTINE_AGENT = "claude-code-routine";
+
+/** An open issue is resolved by Tracemind once this many sessions in its projects ran without it. */
+export const QUIET_SESSIONS = 5;
+/** …and the last of them ended at least this long after it was last seen. */
+export const QUIET_MS = 86_400_000;
+/** Who resolved an issue that stopped happening, as the issue page shows it. */
+export const AUTO_RESOLVER = "Tracemind";
 function kindClause(kind: SessionKind | undefined, prefix = ""): { sql: string; params: unknown[] } {
   if (kind === "routines") return { sql: ` AND ${prefix}agent = ?`, params: [ROUTINE_AGENT] };
   if (kind === "sessions") return { sql: ` AND ${prefix}agent <> ?`, params: [ROUTINE_AGENT] };
   return { sql: "", params: [] };
+}
+
+/** A project as a note names it: a routine by its name (which may hold a slash), a folder by its last part. */
+function projectLabel(project: string): string {
+  return project.startsWith("routines/") ? project.slice("routines/".length) : project.split("/").filter(Boolean).pop() ?? project;
 }
 
 export class Store {
@@ -160,6 +172,9 @@ export class Store {
          last_seen = COALESCE((SELECT MAX(s.ended_at) FROM findings f JOIN sessions s ON s.workspace = f.workspace AND s.id = f.session_id
                                 WHERE f.workspace = issues.workspace AND f.key = issues.key), last_seen)`,
     );
+    // Issues that stopped happening before Tracemind resolved them on its own.
+    const spaces = await this.db.all<Row>("SELECT DISTINCT workspace FROM issues WHERE status = 'open'");
+    for (const r of spaces) await this.autoResolve(String(r.workspace));
     const missing = await this.db.all<Row>("SELECT workspace, key FROM issues WHERE num IS NULL ORDER BY workspace, first_seen, key");
     if (missing.length === 0) return;
     await this.db.transaction(async (db) => {
@@ -218,6 +233,45 @@ export class Store {
       );
       for (const f of trace.findings) await this.touchIssue(db, ws, f, s.startedAt, s.endedAt);
     });
+    await this.autoResolve(ws, redact(s.project));
+  }
+
+  /**
+   * Resolves the open issues that stopped happening: QUIET_SESSIONS sessions in the projects where
+   * an issue happened started after it was last seen (and after anyone last reopened it), and none
+   * of them had it. It counts as resolved when the last of those sessions ended, so a session that
+   * has it again after that reopens it (touchIssue). With `project`, only issues seen there.
+   */
+  async autoResolve(ws: string, project?: string) {
+    const open = await this.db.all<Row>(
+      `SELECT i.key, i.last_seen, i.resolved_at FROM issues i WHERE i.workspace = ? AND i.status = 'open'
+       ${project === undefined ? "" : `AND EXISTS (SELECT 1 FROM findings f JOIN sessions s ON s.workspace = f.workspace AND s.id = f.session_id
+                                                  WHERE f.workspace = i.workspace AND f.key = i.key AND s.project = ?)`}`,
+      project === undefined ? [ws] : [ws, project],
+    );
+    for (const r of open) {
+      const key = String(r.key);
+      const reopenedAt = r.resolved_at ? String(r.resolved_at) : "";
+      const after = String(r.last_seen) > reopenedAt ? String(r.last_seen) : reopenedAt;
+      const quiet = await this.db.all<Row>(
+        `SELECT s.project, s.ended_at FROM sessions s
+          WHERE s.workspace = ? AND s.started_at > ?
+            AND s.project IN (SELECT s2.project FROM findings f JOIN sessions s2 ON s2.workspace = f.workspace AND s2.id = f.session_id
+                               WHERE f.workspace = ? AND f.key = ?)
+            AND NOT EXISTS (SELECT 1 FROM findings f WHERE f.workspace = s.workspace AND f.session_id = s.id AND f.key = ?)
+          ORDER BY s.ended_at`,
+        [ws, after, ws, key, key],
+      );
+      // Enough quiet sessions, and a day of them: a burst of quick follow-ups is not "stopped".
+      const settled = quiet.findIndex((q, i) => i + 1 >= QUIET_SESSIONS && Date.parse(String(q.ended_at)) - Date.parse(after) >= QUIET_MS);
+      if (settled < 0) continue;
+      const names = [...new Set(quiet.map((q) => projectLabel(String(q.project))))];
+      const where = names.length === 1 ? `in ${names[0]}` : `in ${names.length} projects`;
+      await this.db.run(
+        "UPDATE issues SET status = 'resolved', resolved_at = ?, resolved_by = ?, note = ?, reopened = 0 WHERE workspace = ? AND key = ? AND status = 'open'",
+        [String(quiet[settled].ended_at), AUTO_RESOLVER, `Not seen in the ${quiet.length} sessions ${where} since it last happened.`, ws, key],
+      );
+    }
   }
 
   /** Opens an issue the first time it is seen, and reopens a resolved one that is seen again after it was resolved. */
@@ -226,7 +280,7 @@ export class Store {
    * ended, whatever order sessions are saved in (an import goes by file date, not session date).
    */
   private async touchIssue(db: Db, ws: string, f: Finding, startedAt: string, at: string) {
-    const rows = await db.all<Row>("SELECT status, resolved_at, first_seen, last_seen FROM issues WHERE workspace = ? AND key = ?", [ws, f.key]);
+    const rows = await db.all<Row>("SELECT status, resolved_at, resolved_by, first_seen, last_seen FROM issues WHERE workspace = ? AND key = ?", [ws, f.key]);
     if (rows.length === 0) {
       await db.run(
         `INSERT INTO issues (workspace, key, kind, title, status, first_seen, last_seen, reopened, num)
@@ -238,8 +292,13 @@ export class Store {
     const r = rows[0];
     const first = String(r.first_seen) < startedAt ? String(r.first_seen) : startedAt;
     const last = String(r.last_seen) > at ? String(r.last_seen) : at;
-    if (r.status === "resolved" && r.resolved_at && at > String(r.resolved_at)) {
-      await db.run("UPDATE issues SET status = 'open', reopened = 1, first_seen = ?, last_seen = ? WHERE workspace = ? AND key = ?", [first, last, ws, f.key]);
+    // Resolved by Tracemind means none of the quiet sessions after last seen had it: a session that
+    // did, saved late (an import), proves that wrong too.
+    const back = at > String(r.resolved_at) || (r.resolved_by === AUTO_RESOLVER && at > String(r.last_seen));
+    if (r.status === "resolved" && r.resolved_at && back) {
+      // Back after it was resolved, or never gone: a late session from inside the quiet stretch.
+      const reopened = at > String(r.resolved_at) ? 1 : 0;
+      await db.run("UPDATE issues SET status = 'open', reopened = ?, first_seen = ?, last_seen = ? WHERE workspace = ? AND key = ?", [reopened, first, last, ws, f.key]);
     } else {
       await db.run("UPDATE issues SET first_seen = ?, last_seen = ? WHERE workspace = ? AND key = ?", [first, last, ws, f.key]);
     }
@@ -420,7 +479,8 @@ export class Store {
         [now(), by, redact(note).slice(0, 500), ws, key],
       );
     } else {
-      await this.db.run("UPDATE issues SET status = 'open' WHERE workspace = ? AND key = ?", [ws, key]);
+      // Reopened by hand: Tracemind counts quiet sessions again from now before it resolves it.
+      await this.db.run("UPDATE issues SET status = 'open', resolved_at = ? WHERE workspace = ? AND key = ?", [now(), ws, key]);
     }
   }
 
