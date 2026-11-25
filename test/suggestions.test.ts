@@ -102,6 +102,27 @@ describe("suggestions", () => {
     expect(readFileSync(file, "utf8").trimEnd()).toBe(before.trimEnd());
   });
 
+  it("keep an applied or dismissed fix listed after its issue stops showing up, so it can still be undone", async () => {
+    const { store, app } = await setup();
+    const list = await (await app.request("/api/suggestions?days=7")).json();
+    const rule = list.find((s: any) => s.title.startsWith("Stop agents"));
+    const other = list.find((s: any) => s.status === "open" && s.id !== rule.id && s.kind !== "routine");
+    await post(app, `/api/suggestions/${rule.id}/apply`);
+    await post(app, `/api/suggestions/${other.id}/dismiss`);
+
+    // The issues go away (no session in the window hits them any more).
+    await store.db.run("DELETE FROM findings WHERE workspace = ?", ["local"]);
+    const later = await (await app.request("/api/suggestions?days=1")).json();
+    const kept = later.find((s: any) => s.id === rule.id);
+    expect(kept).toMatchObject({ status: "applied", title: rule.title, action: rule.action });
+    expect(later.find((s: any) => s.id === other.id)?.status).toBe("dismissed");
+
+    // And it can still be undone from there.
+    expect((await post(app, `/api/suggestions/${rule.id}/undo`)).status).toBe(200);
+    expect(readFileSync(join(claudeDir, "CLAUDE.md"), "utf8")).not.toContain(`tracemind:${rule.id}`);
+    expect((await (await app.request("/api/suggestions?days=1")).json()).find((s: any) => s.id === rule.id)).toBeUndefined();
+  });
+
   it("install the routine as a SessionStart hook, next to the person's own hooks", async () => {
     const { app } = await setup();
     const settings = join(claudeDir, "settings.json");

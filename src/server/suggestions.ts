@@ -249,14 +249,12 @@ export async function buildSuggestions(store: Store, ws: string, local: boolean,
   const recurring = f.groups.filter((g) => g.sessions >= 3 && g.kind !== "interrupted");
   if (recurring.length >= 2) {
     out.push({
+      ...ROUTINE,
       id: sid("routine", "context"),
-      kind: "routine",
-      title: "Brief new sessions on their project's known problems",
       why: `${recurring.length} issues happened in 3 or more sessions each. A Claude Code hook can give each new session the ones from its own project, with what to do instead, before it starts.`,
       sessions: Math.max(...recurring.map((g) => g.sessions)),
       examples: [],
       causes: recurring.slice(0, 5).map((g) => g.id),
-      action: { type: "routine", event: "SessionStart", command: "" },
     });
   }
 
@@ -297,7 +295,24 @@ export async function buildSuggestions(store: Store, ws: string, local: boolean,
   }
 
   // State and effect.
-  const states = new Map((await store.db.all<Row>("SELECT id, status, at FROM suggestions WHERE workspace = ?", [ws])).map((r) => [String(r.id), r]));
+  const states = new Map((await store.db.all<Row>("SELECT id, status, at, detail FROM suggestions WHERE workspace = ?", [ws])).map((r) => [String(r.id), r]));
+  // A fix that was applied or dismissed stays listed whatever the window: its issue may have become
+  // rare (that is the point of applying it), and it must stay where it can be seen and undone.
+  // It comes back from the copy kept when its state was set.
+  const built = new Set(out.map((s) => s.id));
+  for (const [id, st] of states) {
+    if (built.has(id) || (st.status !== "applied" && st.status !== "dismissed")) continue;
+    const kept = keptCopy(id, String(st.detail ?? "{}"));
+    if (kept) {
+      out.push(kept);
+      built.add(id);
+    }
+  }
+  // The brief installed by hand, or by an older Tracemind, before a copy was kept.
+  const routineId = sid("routine", "context");
+  if (local && !built.has(routineId) && hasHook("SessionStart", CONTEXT_MARKER)) {
+    out.push({ ...ROUTINE, id: routineId, why: "Installed: each new session is told what keeps going wrong in its project.", sessions: 0, examples: [], causes: [] });
+  }
   const result: Suggestion[] = [];
   for (const s of out) {
     const st = states.get(s.id);
@@ -364,12 +379,12 @@ export async function apply(store: Store, ws: string, s: Suggestion, command: st
     if (before != null) copyFileSync(file, join(backupDir(), `${basename(file)}.${s.id}.${Date.now()}.bak`));
     const add = block(s.id, s.action.text);
     writeFileSync(file, (before ?? "").replace(/\n*$/, "\n") + add);
-    await setState(store, ws, s.id, "applied", { file, added: add });
+    await setState(store, ws, s.id, "applied", { file, added: add, fix: copyOf(s) });
     return file;
   }
   if (s.action.type === "routine") {
     const file = setHook("SessionStart", tagged(command), CONTEXT_MARKER, true);
-    await setState(store, ws, s.id, "applied", { file });
+    await setState(store, ws, s.id, "applied", { file, fix: copyOf(s) });
     return file;
   }
   throw new Error("This suggestion is not something Tracemind can apply; copy it to Claude instead.");
@@ -388,6 +403,32 @@ export async function undo(store: Store, ws: string, s: Suggestion): Promise<voi
   }
   if (s.action.type === "routine") setHook("SessionStart", "", CONTEXT_MARKER, false);
   await setState(store, ws, s.id, "open", {});
+}
+
+const ROUTINE = {
+  kind: "routine" as const,
+  title: "Brief new sessions on their project's known problems",
+  action: { type: "routine" as const, event: "SessionStart" as const, command: "" },
+};
+
+type Built = Omit<Suggestion, "status" | "at" | "effect" | "issue">;
+
+/** What is kept of a fix when it is applied or dismissed, to list it again later. */
+export function copyOf(s: Built): Built {
+  return { id: s.id, kind: s.kind, title: s.title, why: s.why, sessions: s.sessions, examples: [], causes: s.causes, action: s.action };
+}
+
+/** A stored fix, from its kept copy; for older records, rebuilt when its id is one of the known global rules. */
+function keptCopy(id: string, detail: string): Built | null {
+  try {
+    const d = JSON.parse(detail);
+    if (d?.fix?.id === id && d.fix.action && d.fix.title) return { ...d.fix, examples: [] };
+  } catch {
+    // Not JSON: fall through.
+  }
+  const rule = GLOBAL_RULES.find((r) => sid("rule", r.what) === id);
+  if (!rule) return null;
+  return { id, kind: "rule", title: rule.title, why: `For "${rule.what}".`, sessions: 0, examples: [], causes: [rule.what], action: { type: "rule", file: globalClaudeMd(), scope: "global", text: rule.text } };
 }
 
 export async function setState(store: Store, ws: string, id: string, status: Suggestion["status"], detail: object) {

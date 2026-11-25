@@ -12,7 +12,7 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { InvalidTrace, validateTrace } from "../core/validate.ts";
 import { causeCounts, causeDetail, failureMarks, issueGroups, sessionIssues } from "../store/insights.ts";
 import type { Store } from "../store/store.ts";
-import { apply, buildSuggestions, preview, sessionContext, setState, undo } from "./suggestions.ts";
+import { apply, buildSuggestions, copyOf, preview, sessionContext, setState, undo } from "./suggestions.ts";
 
 export type Viewer = { workspace: string; person: string; role: "admin" | "member"; mode: "local" | "server" };
 
@@ -341,7 +341,7 @@ export function createApp(opts: AppOptions) {
     if (!s) return c.json({ error: "not found" }, 404);
     if (verb === "dismiss" || verb === "restore") {
       if (!sameOrigin(c)) return c.json({ error: "forbidden" }, 403);
-      await setState(store, v.workspace, s.id, verb === "dismiss" ? "dismissed" : "open", {});
+      await setState(store, v.workspace, s.id, verb === "dismiss" ? "dismissed" : "open", verb === "dismiss" ? { fix: copyOf(s) } : {});
       return c.json({ ok: true });
     }
     const refused = localWrite(c, mode);
