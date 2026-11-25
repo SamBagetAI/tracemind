@@ -16,7 +16,7 @@ export function home(): string {
 
 export const dbPath = () => join(home(), "tracemind.db");
 export const logPath = () => join(home(), "hook.log");
-const configPath = () => join(home(), "config.json");
+export const configPath = () => join(home(), "config.json");
 
 function defaultPerson(): string {
   try {

@@ -182,6 +182,14 @@ describe("local mode", () => {
 });
 
 describe("server mode", () => {
+  it("accepts a setup secret that was saved with a trailing newline", async () => {
+    const store = new Store(fromPgQueryable(new PGlite() as any));
+    await store.migrate();
+    const app = createApp({ store, mode: "server", setupSecret: "s3t\n" });
+    expect((await app.request("/api/setup", json({ workspace: "acme", person: "Ada" }, { "x-setup-secret": "s3t" }))).status).toBe(200);
+  });
+
+
   it("sets up once, then needs a token", async () => {
     const { app } = await serverApp();
     expect((await app.request("/api/setup", json({ workspace: "acme", person: "Ada" }, { "x-setup-secret": "wrong" }))).status).toBe(403);

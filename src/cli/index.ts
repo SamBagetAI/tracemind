@@ -11,7 +11,7 @@ import { MAX_STEPS } from "../core/validate.ts";
 import { openSqlite } from "../store/db.ts";
 import { Store } from "../store/store.ts";
 import { hooksInstalled, installHooks, listTranscripts, readSessionFiles, removeHooks } from "./claude.ts";
-import { type Config, dbPath, ensureHome, home, loadConfig, logPath, saveConfig } from "./config.ts";
+import { type Config, configPath, dbPath, ensureHome, home, loadConfig, logPath, saveConfig } from "./config.ts";
 
 const WS = "local";
 const PUSH_MAX_BYTES = 4_000_000;
@@ -359,7 +359,7 @@ Server:   ${cfg.server ? `${cfg.server.url} as ${cfg.server.person} in ${cfg.ser
         cfg.autoPush = true;
         saveConfig(cfg);
         console.log(`Workspace ${r.workspace} is ready and this machine is linked as its admin, ${r.person}.
-Sign in to ${values.url} with this token (it is also saved in ~/.tracemind/config.json):
+Sign in to ${values.url} with this token (it is also saved in ${configPath()}):
 
   ${r.token}
 
