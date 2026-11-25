@@ -1,0 +1,23 @@
+name: Bug
+description: Something in Tracemind is wrong or broken
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you saw instead. A screenshot helps.
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Tracemind (`git rev-parse --short HEAD`), Claude Code (`claude --version`) and Node (`node --version`).
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Hook log
+      description: The last lines of `~/.tracemind/hook.log`, if the problem is about recording sessions. Check them for anything private first.
+      render: text
