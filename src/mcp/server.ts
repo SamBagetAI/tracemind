@@ -343,7 +343,7 @@ export function createMcpServer(call: ApiCall, opts: { canApply: boolean }): Mcp
     "resolve_issue",
     {
       title: "Resolve or reopen an issue",
-      description: "Marks an issue resolved (with an optional note on what was done), or opens it again. A resolved issue opens again by itself if a later session hits it.",
+      description: "Marks an issue resolved (with an optional note on what was done), or opens it again. Issues also resolve by themselves after five quiet sessions over a day in their projects, and open again by themselves if a later session hits them.",
       inputSchema: {
         issue: z.string().min(1).describe("The issue's key or name."),
         action: z.enum(["resolve", "reopen"]).default("resolve"),

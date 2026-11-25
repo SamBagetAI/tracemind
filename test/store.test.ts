@@ -6,13 +6,19 @@ import { describe, expect, it } from "vitest";
 import { parseClaudeSession } from "../src/core/parse-claude.ts";
 import type { Trace } from "../src/core/types.ts";
 import { type Db, fromPgQueryable, openSqlite, toPg } from "../src/store/db.ts";
-import { Store } from "../src/store/store.ts";
+import { AUTO_RESOLVER, QUIET_SESSIONS, Store } from "../src/store/store.ts";
 import { mainTranscript, subagentTranscript } from "./fixtures/session.ts";
 
 const trace = () => parseClaudeSession("sess-1", mainTranscript(), { person: "Ada", subagents: [subagentTranscript()] });
 
 function later(t: Trace, id: string, iso: string): Trace {
   return { ...t, session: { ...t.session, id, startedAt: iso, endedAt: iso } };
+}
+
+/** The same session without anything going wrong, at a time `days` from now, in `project` if given. */
+function clean(t: Trace, id: string, days: number, project?: string): Trace {
+  const iso = new Date(Date.now() + days * 86400_000).toISOString();
+  return { ...t, steps: t.steps.map((x) => ({ ...x, isError: false })), findings: [], session: { ...t.session, id, startedAt: iso, endedAt: iso, ...(project ? { project } : {}) } };
 }
 
 const dbs: [string, () => Promise<Db>][] = [
@@ -72,6 +78,74 @@ describe.each(dbs)("Store on %s", (_, open) => {
     expect(again?.issue.status).toBe("open");
     expect(again?.issue.reopened).toBe(true);
     expect(again?.issue.sessions).toBe(3);
+  });
+
+  it("resolves an issue on its own once sessions in its project stop having it, and reopens it if it comes back", async () => {
+    const s = await store();
+    await s.saveTrace("w", later(trace(), "bad", new Date(Date.now() - 20 * 86400_000).toISOString()));
+    const key = (await s.issues("w")).find((i) => i.kind === "tool_error")!.key;
+    const status = async () => (await s.issue("w", key))!.issue;
+
+    // Quiet sessions in another project say nothing about this one.
+    for (let i = 0; i < QUIET_SESSIONS; i++) await s.saveTrace("w", clean(trace(), `elsewhere-${i}`, -19 + i, "/code/other"));
+    expect((await status()).status).toBe("open");
+
+    for (let i = 0; i < QUIET_SESSIONS - 1; i++) await s.saveTrace("w", clean(trace(), `quiet-${i}`, -15 + i));
+    expect((await status()).status).toBe("open");
+    await s.saveTrace("w", clean(trace(), "quiet-last", -10));
+    const done = await status();
+    expect(done).toMatchObject({ status: "resolved", resolvedBy: AUTO_RESOLVER });
+    expect(done.note).toContain(`${QUIET_SESSIONS} sessions`);
+    expect(done.resolvedAt?.slice(0, 10)).toBe(new Date(Date.now() - 10 * 86400_000).toISOString().slice(0, 10));
+
+    // A session that had it after the last quiet one brings it back.
+    await s.saveTrace("w", later(trace(), "back", new Date(Date.now() - 5 * 86400_000).toISOString()));
+    expect(await status()).toMatchObject({ status: "open", reopened: true });
+  });
+
+  it("waits for a day of quiet, not a burst of quick follow-ups", async () => {
+    const s = await store();
+    const at = Date.now() - 20 * 86400_000;
+    await s.saveTrace("w", later(trace(), "bad", new Date(at).toISOString()));
+    const key = (await s.issues("w")).find((i) => i.kind === "tool_error")!.key;
+    const minutes = (m: number) => (m * 60_000) / 86400_000 - 20;
+    for (let i = 1; i <= QUIET_SESSIONS + 2; i++) await s.saveTrace("w", clean(trace(), `burst-${i}`, minutes(i * 3)));
+    expect((await s.issue("w", key))!.issue.status).toBe("open");
+    await s.saveTrace("w", clean(trace(), "next-day", -18));
+    expect((await s.issue("w", key))!.issue.status).toBe("resolved");
+  });
+
+  it("names a routine by its whole name, slash included", async () => {
+    const s = await store();
+    const routine = "routines/Envoi vague BFC + LinkedIn 5/5";
+    const bad = later(trace(), "bad", new Date(Date.now() - 20 * 86400_000).toISOString());
+    await s.saveTrace("w", { ...bad, session: { ...bad.session, project: routine } });
+    const key = (await s.issues("w")).find((i) => i.kind === "tool_error")!.key;
+    for (let i = 0; i < QUIET_SESSIONS; i++) await s.saveTrace("w", clean(trace(), `quiet-${i}`, -15 + i, routine));
+    expect((await s.issue("w", key))!.issue.note).toContain("in Envoi vague BFC + LinkedIn 5/5 since");
+  });
+
+  it("reopens an issue it resolved when a session saved late had it in the quiet stretch", async () => {
+    const s = await store();
+    await s.saveTrace("w", later(trace(), "bad", new Date(Date.now() - 20 * 86400_000).toISOString()));
+    const key = (await s.issues("w")).find((i) => i.kind === "tool_error")!.key;
+    for (let i = 0; i < QUIET_SESSIONS; i++) await s.saveTrace("w", clean(trace(), `quiet-${i}`, -15 + i));
+    expect((await s.issue("w", key))!.issue.status).toBe("resolved");
+    await s.saveTrace("w", later(trace(), "late", new Date(Date.now() - 12.5 * 86400_000).toISOString()));
+    // Open again, but not "back after it was resolved": it never went away.
+    expect((await s.issue("w", key))!.issue).toMatchObject({ status: "open", reopened: false });
+  });
+
+  it("leaves an issue someone reopened by hand open until new quiet sessions come in", async () => {
+    const s = await store();
+    await s.saveTrace("w", later(trace(), "bad", new Date(Date.now() - 20 * 86400_000).toISOString()));
+    const key = (await s.issues("w")).find((i) => i.kind === "tool_error")!.key;
+    for (let i = 0; i < QUIET_SESSIONS; i++) await s.saveTrace("w", clean(trace(), `quiet-${i}`, -15 + i));
+    await s.setIssueStatus("w", key, "open", "Ada", "");
+    await s.saveTrace("w", clean(trace(), "one-more", -1));
+    expect((await s.issue("w", key))!.issue.status).toBe("open");
+    for (let i = 0; i < QUIET_SESSIONS; i++) await s.saveTrace("w", clean(trace(), `after-${i}`, 1 + i));
+    expect((await s.issue("w", key))!.issue).toMatchObject({ status: "resolved", resolvedBy: AUTO_RESOLVER });
   });
 
   it("sums up sessions, tools and memory", async () => {
