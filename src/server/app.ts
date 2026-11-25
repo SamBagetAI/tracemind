@@ -232,8 +232,9 @@ export function createApp(opts: AppOptions) {
   api.get("/sessions/:id", async (c) => {
     const ws = c.get("viewer").workspace;
     const from = since(windowDays(c));
-    const [t, nav] = await Promise.all([store.trace(ws, c.req.param("id")), store.neighbours(ws, c.req.param("id"), from)]);
+    const t = await store.trace(ws, c.req.param("id"));
     if (!t) return c.json({ error: "not found" }, 404);
+    const nav = await store.neighbours(ws, t.session.id, from);
     // Each issue's session count over the same window as the rest of the app.
     const keys = Object.keys(t.issues);
     // Counts are per cause (all variants), the same numbers the Issues list shows. A session older
