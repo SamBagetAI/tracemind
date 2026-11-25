@@ -18,7 +18,8 @@ export function sentence(s: Pick<Session, "toolErrors"> & { issues?: SessionIssu
   const parts: Part[] = [{ text: failed === 0 ? `${lead} ` : `${lead}: ` }];
   shown.forEach((i, k) => {
     if (k > 0) parts.push({ text: k === shown.length - 1 && issues.length <= 2 ? " and " : ", " });
-    parts.push({ mark: i.what, key: i.key, step: i.seq });
+    // Only a named issue gets the highlighter; an error without a name is said plainly.
+    parts.push(i.named === false ? { text: "an error without a name yet" } : { mark: i.what, key: i.key, step: i.seq });
   });
   const more = issues.length - shown.length;
   parts.push({ text: more > 0 ? ` and ${more} more.` : "." });
@@ -35,10 +36,10 @@ export function activeLabel(ms: number): string {
   return m ? `${h} h ${String(m).padStart(2, "0")}` : `${h} h`;
 }
 
-/** "Today", "Yesterday", "Mon 23", "Wed 18 Nov" when it is not this month. */
-export function dayLabel(day: string, now = new Date()): string {
-  const today = now.toISOString().slice(0, 10);
-  const yesterday = new Date(now.getTime() - 86400000).toISOString().slice(0, 10);
+/** "Today", "Yesterday", "Mon 23", "Wed 18 Nov" when it is not this month. `day` is a local YYYY-MM-DD. */
+export function dayLabel(day: string, now = new Date(), toDay = localDay): string {
+  const today = toDay(now.toISOString());
+  const yesterday = toDay(new Date(now.getTime() - 86400000).toISOString());
   if (day === today) return "Today";
   if (day === yesterday) return "Yesterday";
   const d = new Date(`${day}T12:00:00Z`);
@@ -48,12 +49,18 @@ export function dayLabel(day: string, now = new Date()): string {
   return sameMonth ? `${wd} ${dd}` : `${wd} ${dd} ${d.toLocaleDateString("en-GB", { month: "short", timeZone: "UTC" })}`;
 }
 
-/** Sessions by the day they started, newest day first, newest session first within a day. */
-export function byDay<T extends Pick<Session, "startedAt">>(sessions: T[]): { day: string; sessions: T[] }[] {
+/** A date as YYYY-MM-DD in the viewer's own time zone. */
+export const localDay = (iso: string) => new Date(iso).toLocaleDateString("en-CA");
+
+/**
+ * Sessions by the day they were last active, in the viewer's time zone, newest first: a session
+ * that ran from the 15th to the 24th belongs with the 24th, where its work ended.
+ */
+export function byDay<T extends Pick<Session, "endedAt">>(sessions: T[], day = (s: T) => localDay(s.endedAt)): { day: string; sessions: T[] }[] {
   const days = new Map<string, T[]>();
-  for (const s of [...sessions].sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1))) {
-    const day = s.startedAt.slice(0, 10);
-    days.set(day, [...(days.get(day) ?? []), s]);
+  for (const s of [...sessions].sort((a, b) => (a.endedAt < b.endedAt ? 1 : -1))) {
+    const d = day(s);
+    days.set(d, [...(days.get(d) ?? []), s]);
   }
   return [...days.entries()].map(([day, list]) => ({ day, sessions: list }));
 }

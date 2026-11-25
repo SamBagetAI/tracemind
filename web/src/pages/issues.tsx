@@ -48,7 +48,7 @@ function IssueRow({ g, days }: { g: IssueGroup; days: number }) {
         </span>
         <span className="hidden sm:block"><Trend now={g.sessions} before={g.previous ?? 0} /></span>
         <span className={cn("text-right text-[13px] num", level)}>{g.sessions}</span>
-        <span className="hidden sm:block"><FixMark fix={g.fix} /></span>
+        <span className="hidden sm:block"><FixMark fix={g.fix} at={g.fixAt} lastSeen={g.lastSeen} /></span>
         <span className="hidden text-right text-[12px] text-muted-foreground num lg:block">{dayLabel(g.firstSeen.slice(0, 10))}</span>
         <span className="hidden text-right text-[12px] text-muted-foreground num lg:block">{when(g.lastSeen)}</span>
       </Link>

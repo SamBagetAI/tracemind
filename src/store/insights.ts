@@ -6,6 +6,7 @@
 import { causeKey, describeIssue, KIND, topTools, type IssueKind } from "../core/describe.ts";
 import type { Row } from "./db.ts";
 import type { IssueRow, Store } from "./store.ts";
+import { errorLine } from "../core/issues.ts";
 
 const n = (v: unknown): number => (v == null ? 0 : Number(v));
 const DAY = 86400000;
@@ -204,13 +205,29 @@ export async function causeDetail(store: Store, ws: string, key: string, since: 
   const history = await issueHistory(store, ws, keys, since);
   const latest = sessions[0];
   const [step] = latest
-    ? await store.db.all<Row>("SELECT output FROM steps WHERE workspace = ? AND session_id = ? AND seq = ?", [ws, latest.id, latest.seq])
+    ? await store.db.all<Row>("SELECT name, input, output FROM steps WHERE workspace = ? AND session_id = ? AND seq = ?", [ws, latest.id, latest.seq])
     : [];
+  // What each variant said, as written, from the latest step that hit it.
+  const said = await store.db.all<Row>(
+    `SELECT f.key, st.output, s.ended_at FROM findings f
+       JOIN steps st ON st.workspace = f.workspace AND st.session_id = f.session_id AND st.seq = f.seq
+       JOIN sessions s ON s.workspace = f.workspace AND s.id = f.session_id
+      WHERE f.workspace = ? AND f.key IN (${ph}) ORDER BY s.ended_at DESC`,
+    [ws, ...keys],
+  );
+  const messages: Record<string, string> = {};
+  for (const r of said) {
+    const k = String(r.key);
+    if (!(k in messages)) messages[k] = errorLine(String(r.output)).replace(/<\/?tool_use_error>/g, "").slice(0, 300);
+  }
   return {
     cause: { ...g, sessions: inWindow?.sessions ?? 0, daily: inWindow?.daily ?? [] },
     allTimeSessions: g.sessions,
     history,
     example: step ? String(step.output).slice(0, 2000) : null,
+    /** The latest step that hit it: the tool and what it was asked to do. */
+    exampleStep: step ? { name: String(step.name), input: String(step.input).slice(0, 2000) } : null,
+    messages,
     sessions: sessions.map((r) => ({
       id: String(r.id),
       title: String(r.title),
@@ -235,7 +252,7 @@ export async function causeCounts(store: Store, ws: string, since: string) {
  * step. What a sentence about the session says went wrong.
  */
 export async function sessionIssues(store: Store, ws: string, ids: string[]) {
-  const out: Record<string, { what: string; seq: number; key: string }[]> = {};
+  const out: Record<string, { what: string; seq: number; key: string; named: boolean }[]> = {};
   if (ids.length === 0) return out;
   const rows = await store.db.all<Row>(
     `SELECT f.session_id, f.seq, f.key, i.kind, i.title FROM findings f JOIN issues i ON i.workspace = f.workspace AND i.key = f.key
@@ -246,7 +263,7 @@ export async function sessionIssues(store: Store, ws: string, ids: string[]) {
     const d = describeIssue({ kind: r.kind as never, title: String(r.title) });
     const list = (out[String(r.session_id)] ??= []);
     const what = d.plain ? d.what : "an error without a name yet";
-    if (!list.some((x) => x.what === what)) list.push({ what, seq: n(r.seq), key: String(r.key) });
+    if (!list.some((x) => x.what === what)) list.push({ what, seq: n(r.seq), key: String(r.key), named: d.plain });
   }
   return out;
 }

@@ -21,7 +21,7 @@ function Stats({ o, days }: { o: Overview; days: number }) {
   const n = (v: string | number) => <b className="font-semibold">{v}</b>;
   return (
     <p className="diary-stats">
-      <Link to="/sessions" className="hover:underline">{n(o.sessions)} {o.sessions === 1 ? "session" : "sessions"}</Link>, {n(activeLabel(o.activeMs))} with Claude.{" "}
+      <Link to="/sessions" className="hover:underline">{n(o.sessions)} {o.sessions === 1 ? "session" : "sessions"}</Link>, {n(activeLabel(o.activeMs))} of active time with Claude.{" "}
       <Link to="/sessions?show=clean" className="hover:underline">{n(clean)} ran clean</Link>
       {p.sessions > 0 && <span className="text-muted-foreground"> ({p.sessions - p.withIssues} of {p.sessions} the {days} days before)</span>}.{" "}
       <Link to="/tools" className="hover:underline">{n(o.toolErrors.toLocaleString("en-US"))} failed calls</Link>, {n(tokens(o.outputTokens))} tokens out
@@ -37,7 +37,7 @@ function Entry({ s }: { s: Session }) {
     <div className="py-1.5">
       <Link to={`/sessions/${s.id}`} className="text-[16px] font-semibold text-foreground underline-offset-4 hover:underline">{s.title}</Link>
       <div className="text-[13px] text-faint">
-        {projectName(s.project)} · {activeLabel(s.activeMs)}
+        {projectName(s.project)} · {activeLabel(s.activeMs)} active
       </div>
       <p className={clean ? "mt-0.5 text-[14px] text-ok" : "mt-0.5 text-[14px] text-foreground/80"}>
         {parts.map((p, i) =>
@@ -60,7 +60,10 @@ export function DiaryPage() {
   const list = useApi<Session[]>(`/sessions?days=${days}&limit=2000&issues=1`);
   const fixes = useApi<Suggestion[]>(`/suggestions?days=${days}`);
   const [shown, setShown] = useState(PAGE);
-  const open = (fixes.data ?? []).filter((s) => s.status === "open").length;
+  // A fix is a change Tracemind can make; an investigation is a prompt for Claude, and is said so.
+  const openList = (fixes.data ?? []).filter((s) => s.status === "open");
+  const open = openList.filter((s) => s.action.type === "rule" || s.action.type === "routine").length;
+  const investigate = openList.length - open;
 
   const error = o.error ?? list.error;
   const groups = byDay((list.data ?? []).slice(0, shown));
@@ -68,16 +71,18 @@ export function DiaryPage() {
   const range = `${from.toLocaleDateString("en-GB", { day: "numeric", month: "short" })} – today`;
 
   return (
-    <main className="mx-auto w-full max-w-[760px] px-4 pt-8 pb-20 sm:px-6">
+    <main className="mx-auto w-full max-w-[1120px] px-4 pt-8 pb-20 sm:px-6">
+      <div className="max-w-[760px]">
       <div className="text-[13px] text-faint">Last {days} days · {range}</div>
       {error && <Failed error={error} />}
       {!error && (!o.data || !list.data) && <div className="pt-6"><Loading rows={8} /></div>}
       {o.data && list.data && (
         <>
           <Stats o={o.data} days={days} />
-          {open > 0 && (
+          {open + investigate > 0 && (
             <Link to="/fixes" className="mb-8 inline-flex items-center gap-1.5 text-[14px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
-              {open === 1 ? "1 fix" : `${open} fixes`} to review <ArrowRight className="size-3.5" />
+              {[open && (open === 1 ? "1 fix to review" : `${open} fixes to review`), investigate && (investigate === 1 ? "1 issue to investigate" : `${investigate} issues to investigate`)].filter(Boolean).join(" · ")}
+              <ArrowRight className="size-3.5" />
             </Link>
           )}
           <div>
@@ -95,6 +100,7 @@ export function DiaryPage() {
           )}
         </>
       )}
+      </div>
     </main>
   );
 }

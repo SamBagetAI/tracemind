@@ -12,7 +12,7 @@ import { SectionTitle } from "@/components/marks";
 import { Empty, Failed, Loading, Page } from "@/components/shell";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { api, useApi, type Suggestion, type Viewer } from "@/lib/api";
 import { plural, projectName, shortPath } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -139,14 +139,14 @@ export function SuggestionsPage() {
       {list.error && <Failed error={list.error} />}
       {!list.data && !list.error && <Loading rows={10} />}
       {list.data && (
-        <Tabs value={tab} onValueChange={setTab}>
-          <TabsList>
-            <TabsTrigger value="review">To review <span className="ml-1 text-faint num">{open.length}</span></TabsTrigger>
-            <TabsTrigger value="applied">Applied <span className="ml-1 text-faint num">{applied.length}</span></TabsTrigger>
-            <TabsTrigger value="dismissed">Dismissed <span className="ml-1 text-faint num">{dismissed.length}</span></TabsTrigger>
-          </TabsList>
+        <div>
+          <ToggleGroup type="single" value={tab} onValueChange={(v) => v && setTab(v)} variant="outline" size="sm" aria-label="Which fixes" className="mb-2">
+            <ToggleGroupItem value="review" className="h-8 px-3">To review <span className="ml-1 text-faint num">{open.length}</span></ToggleGroupItem>
+            <ToggleGroupItem value="applied" className="h-8 px-3">Applied <span className="ml-1 text-faint num">{applied.length}</span></ToggleGroupItem>
+            <ToggleGroupItem value="dismissed" className="h-8 px-3">Dismissed <span className="ml-1 text-faint num">{dismissed.length}</span></ToggleGroupItem>
+          </ToggleGroup>
 
-          <TabsContent value="review">
+          {tab === "review" && (<div>
             <div>
               {open.length === 0 && <Empty>Nothing to review in the last {days} days. A longer window may show more.</Empty>}
               {groups.rules.map(([file, items]) => (
@@ -168,9 +168,9 @@ export function SuggestionsPage() {
               )}
               {groups.tips.length > 0 && <Group title="Habits">{groups.tips.map((s) => <Row key={s.id} s={s} {...rowProps} highlight={s.id === target} />)}</Group>}
             </div>
-          </TabsContent>
+          </div>)}
 
-          <TabsContent value="applied">
+          {tab === "applied" && (<div>
             {applied.length === 0 ? (
               <Empty>Nothing applied yet. Applied changes show here with how often the problem happened before and since.</Empty>
             ) : (
@@ -186,9 +186,9 @@ export function SuggestionsPage() {
                 ))}
               </ol>
             )}
-          </TabsContent>
+          </div>)}
 
-          <TabsContent value="dismissed">
+          {tab === "dismissed" && (<div>
             {dismissed.length === 0 ? (
               <Empty>Nothing dismissed.</Empty>
             ) : (
@@ -203,8 +203,8 @@ export function SuggestionsPage() {
                 ))}
               </ul>
             )}
-          </TabsContent>
-        </Tabs>
+          </div>)}
+        </div>
       )}
     </Page>
   );

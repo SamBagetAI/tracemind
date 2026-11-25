@@ -26,20 +26,29 @@ describe("diary sentences", () => {
     expect(activeLabel(22 * 60000)).toBe("22 min");
     expect(activeLabel(295 * 60000)).toBe("4 h 55");
     const now = new Date("2026-11-25T12:00:00Z");
-    expect(dayLabel("2026-11-25", now)).toBe("Today");
-    expect(dayLabel("2026-11-24", now)).toBe("Yesterday");
-    expect(dayLabel("2026-11-23", now)).toBe("Mon 23");
-    expect(dayLabel("2026-10-30", now)).toBe("Fri 30 Oct");
+    const utc = (iso: string) => iso.slice(0, 10);
+    expect(dayLabel("2026-11-25", now, utc)).toBe("Today");
+    expect(dayLabel("2026-11-24", now, utc)).toBe("Yesterday");
+    expect(dayLabel("2026-11-23", now, utc)).toBe("Mon 23");
+    expect(dayLabel("2026-10-30", now, utc)).toBe("Fri 30 Oct");
     expect(tokens(1_450_830)).toBe("1.5M");
     expect(tokens(21_441)).toBe("21k");
     expect(dollars(152.03)).toBe("$152");
     expect(dollars(0.79)).toBe("$0.79");
   });
 
-  it("groups sessions by the day they started, newest first", () => {
-    const g = byDay([{ startedAt: "2026-11-23T08:05:00Z" }, { startedAt: "2026-11-24T13:01:00Z" }, { startedAt: "2026-11-24T12:41:00Z" }]);
+  it("groups sessions by the day they were last active, newest first", () => {
+    const utc = (s: { endedAt: string }) => s.endedAt.slice(0, 10);
+    // A session that ran from the 15th to the 24th belongs with the 24th.
+    const g = byDay([{ endedAt: "2026-11-23T08:05:00Z" }, { endedAt: "2026-11-24T21:03:00Z" }, { endedAt: "2026-11-24T13:01:00Z" }], utc);
     expect(g.map((d) => d.day)).toEqual(["2026-11-24", "2026-11-23"]);
-    expect(g[0].sessions[0].startedAt).toBe("2026-11-24T13:01:00Z");
+    expect(g[0].sessions[0].endedAt).toBe("2026-11-24T21:03:00Z");
+  });
+
+  it("does not highlight an error that has no name", () => {
+    const parts = sentence({ toolErrors: 1, issues: [{ what: "an error without a name yet", seq: 3, key: "k", named: false }] });
+    expect(parts.some((p) => "mark" in p)).toBe(false);
+    expect(parts.map((p) => ("text" in p ? p.text : "")).join("")).toBe("1 failed call: an error without a name yet.");
   });
 });
 

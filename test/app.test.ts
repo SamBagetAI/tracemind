@@ -69,6 +69,16 @@ describe("numbers the pages show", () => {
     expect(s.issues.map((i: { seq: number }) => i.seq)).toEqual([...s.issues.map((i: { seq: number }) => i.seq)].sort((a: number, b: number) => a - b));
   });
 
+  it("shows an issue's latest command and its messages as written", async () => {
+    const { app } = await localApp();
+    const groups = await (await app.request("/api/issue-groups?days=3650")).json();
+    const d = await (await app.request(`/api/cause/${encodeURIComponent(groups[0].issues[0].key)}?days=3650`)).json();
+    expect(d.exampleStep).toMatchObject({ name: expect.any(String), input: expect.any(String) });
+    const msgs = Object.values(d.messages) as string[];
+    expect(msgs.length).toBeGreaterThan(0);
+    expect(msgs.every((m) => m.length > 0 && !m.includes("tool_use_error"))).toBe(true);
+  });
+
   it("drops sessions outside the window from the list", async () => {
     const { app } = await localApp();
     const far = await (await app.request("/api/sessions?days=1")).json();

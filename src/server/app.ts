@@ -12,7 +12,7 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { InvalidTrace, validateTrace } from "../core/validate.ts";
 import { causeCounts, causeDetail, failureMarks, issueGroups, sessionIssues } from "../store/insights.ts";
 import type { Store } from "../store/store.ts";
-import { apply, buildSuggestions, copyOf, preview, sessionContext, setState, undo } from "./suggestions.ts";
+import { apply, buildSuggestions, copyOf, effect, preview, sessionContext, setState, undo } from "./suggestions.ts";
 
 export type Viewer = { workspace: string; person: string; role: "admin" | "member"; mode: "local" | "server" };
 
@@ -225,11 +225,13 @@ export function createApp(opts: AppOptions) {
     // this very session hit.
     const from = since(windowDays(c));
     const inWindow = !!c.req.query("days") && t.session.startedAt >= from;
-    const [counts, fx] = await Promise.all([causeCounts(store, ws, inWindow ? from : "0000"), keys.length ? fixes(ws, windowDays(c)) : new Map<string, "ready" | "applied">()]);
+    const [counts, fx] = await Promise.all([causeCounts(store, ws, inWindow ? from : "0000"), keys.length ? fixes(ws, windowDays(c)) : new Map<string, { fix: "ready" | "applied"; at: string | null }>()]);
     for (const k of keys) {
       const cc = counts.get(k);
-      const fix = cc ? (fx.get(cc.cause) ?? null) : null;
-      t.issues[k] = { ...t.issues[k], sessions: cc?.sessions ?? t.issues[k].sessions, cause: cc?.cause, what: cc?.what, fix } as typeof t.issues[string];
+      const f = cc ? fx.get(cc.cause) : undefined;
+      const fix = f?.fix ?? null;
+      const fixAt = f?.at ?? null;
+      t.issues[k] = { ...t.issues[k], sessions: cc?.sessions ?? t.issues[k].sessions, cause: cc?.cause, what: cc?.what, fix, fixAt } as typeof t.issues[string];
     }
     return c.json({ ...t, issueWindow: inWindow ? Number(c.req.query("days")) : null });
   });
@@ -242,13 +244,18 @@ export function createApp(opts: AppOptions) {
   });
 
   /** For each cause: whether a suggested change exists for it, and whether it was applied. */
+  /**
+   * For each cause: whether a fix exists for it and whether it was applied (and when). Only changes
+   * Tracemind can make count as fixes; an investigation is a prompt, not a fix.
+   */
   const fixes = async (ws: string, days: number) => {
-    const out = new Map<string, "ready" | "applied">();
+    const out = new Map<string, { fix: "ready" | "applied"; at: string | null }>();
     for (const sg of await suggestionsFor(ws, days)) {
-      // Every cause a change covers is marked, the session-start brief included, so "fix ready" on a
-      // row always has a change behind it on the cause page and in Suggestions.
-      if (sg.status === "dismissed") continue;
-      for (const cid of sg.causes) if (out.get(cid) !== "applied") out.set(cid, sg.status === "applied" ? "applied" : "ready");
+      if (sg.status === "dismissed" || (sg.action.type !== "rule" && sg.action.type !== "routine")) continue;
+      for (const cid of sg.causes) {
+        if (out.get(cid)?.fix === "applied") continue;
+        out.set(cid, sg.status === "applied" ? { fix: "applied", at: sg.at } : { fix: "ready", at: null });
+      }
     }
     return out;
   };
@@ -265,7 +272,7 @@ export function createApp(opts: AppOptions) {
       fixes(ws, days),
     ]);
     const prev = new Map(previous.map((g) => [g.id, g.sessions]));
-    return c.json(groups.map((g) => ({ ...g, previous: prev.get(g.id) ?? 0, fix: fix.get(g.id) ?? null })));
+    return c.json(groups.map((g) => ({ ...g, previous: prev.get(g.id) ?? 0, fix: fix.get(g.id)?.fix ?? null, fixAt: fix.get(g.id)?.at ?? null })));
   });
 
   api.get("/cause/:key", async (c) => {
@@ -273,10 +280,12 @@ export function createApp(opts: AppOptions) {
     const d = await causeDetail(store, ws, c.req.param("key"), since(windowDays(c)));
     if (!d) return c.json({ error: "not found" }, 404);
     // The same window as the Suggestions page and the Fix column, so they always agree.
-    const suggestion =
+    let suggestion =
       (await suggestionsFor(ws, windowDays(c))).filter((sg) => sg.causes.includes(d.cause.id) && sg.status !== "dismissed")
         // A change made for this cause first; the session-start brief, which covers several, after.
         .sort((a, b) => Number(a.kind === "routine") - Number(b.kind === "routine"))[0] ?? null;
+    // Before and since for this issue alone: a fix covering several issues counts them together.
+    if (suggestion?.status === "applied" && suggestion.at) suggestion = { ...suggestion, effect: await effect(store, ws, [d.cause.id], suggestion.at), effectScope: "issue" } as typeof suggestion;
     return c.json({ ...d, suggestion });
   });
 

@@ -4,10 +4,13 @@
  * once applied, whether it worked. Then the error, what those sessions had loaded, the variants
  * and the sessions.
  */
+import { ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { toast } from "sonner";
 import { FixLine } from "@/components/change";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { errorDetail } from "@/lib/trace";
 import { HeatStrip, SectionTitle } from "@/components/marks";
 import { Empty, Failed, Loading, Page } from "@/components/shell";
 import { Button } from "@/components/ui/button";
@@ -65,12 +68,13 @@ function Resolve({ k, status, variants, onDone }: { k: string; status: "open" | 
  * The variants grouped by what they said, so the same error from cat and from node is one line
  * naming both tools. The five most common first; the rest behind one line.
  */
-function Variants({ issues }: { issues: CauseDetail["cause"]["issues"] }) {
+function Variants({ issues, messages }: { issues: CauseDetail["cause"]["issues"]; messages: Record<string, string> }) {
   const [all, setAll] = useState(false);
   const byMessage = new Map<string, { message: string; tools: Set<string>; variants: number; sessions: number }>();
   for (const i of issues) {
+    // Grouped by the normalized signature, shown as one of them actually said it.
     const msg = describeIssue(i).raw;
-    const e = byMessage.get(msg) ?? { message: msg, tools: new Set<string>(), variants: 0, sessions: 0 };
+    const e = byMessage.get(msg) ?? { message: messages[i.key] || msg, tools: new Set<string>(), variants: 0, sessions: 0 };
     e.tools.add(toolLabel(i.tool) || i.tool);
     e.variants++;
     e.sessions = Math.max(e.sessions, i.windowSessions);
@@ -85,7 +89,7 @@ function Variants({ issues }: { issues: CauseDetail["cause"]["issues"] }) {
       <ul className="divide-y border-y">
         {shown.map((v) => (
           <li key={v.message} className="px-1 py-2 sm:px-2">
-            <span className="block font-mono text-[12px] break-words text-foreground/90">{v.message}</span>
+            <span className="block font-mono text-[12px] break-words text-foreground/90" title={v.message}>{errorDetail(v.message)}</span>
             <span className="mt-0.5 block truncate text-[12px] text-faint">
               <span className="font-mono text-[11px]">{[...v.tools].slice(0, 6).join(", ")}{v.tools.size > 6 ? ` +${v.tools.size - 6}` : ""}</span>
             </span>
@@ -108,7 +112,7 @@ export function IssuePage() {
 
   if (r.error) return <Page title="Issue"><Failed error={r.error} /></Page>;
   if (!r.data) return <Page title="Issue"><Loading rows={8} /></Page>;
-  const { cause: g, allTimeSessions, history, example, suggestion } = r.data;
+  const { cause: g, allTimeSessions, history, example, exampleStep, suggestion } = r.data;
   const { sessions } = r.data;
   const people = new Set(sessions.map((s) => s.person));
   const total = history.reduce((n, d) => n + d.sessions, 0);
@@ -137,7 +141,7 @@ export function IssuePage() {
     >
       <div>
         <section className="mb-10">
-          <SectionTitle>{suggestion?.status === "applied" ? "Fix applied" : suggestion ? "Fix ready" : "Fix"}</SectionTitle>
+          <SectionTitle>{!suggestion ? "Fix" : suggestion.status === "applied" ? "Fix applied" : suggestion.action.type === "rule" || suggestion.action.type === "routine" ? "Fix ready" : "To investigate"}</SectionTitle>
           {suggestion ? (
             <>
               <FixLine s={suggestion} issues />
@@ -161,14 +165,30 @@ export function IssuePage() {
 
         {example && (
           <section className="mb-10">
-            <SectionTitle aside={sessions[0] && <Link to={`/sessions/${sessions[0].id}#s-${sessions[0].seq}`} className="text-[12px] text-faint hover:text-foreground hover:underline">latest, step {num(sessions[0].seq)}</Link>}>Error</SectionTitle>
-            <pre className="max-h-64 overflow-auto rounded-md border bg-pane px-3 py-2.5 font-mono text-[12px] leading-relaxed break-words whitespace-pre-wrap text-foreground/90">
-              {example.replace(/<\/?tool_use_error>/g, "").trim()}
-            </pre>
+            <SectionTitle aside={sessions[0] && <Link to={`/sessions/${sessions[0].id}#s-${sessions[0].seq}`} className="text-[12px] text-faint hover:text-foreground hover:underline">open the session at step {num(sessions[0].seq)}</Link>}>Latest time it happened</SectionTitle>
+            {exampleStep && (
+              <div className="mb-3">
+                <div className="mb-1 text-[12px] text-faint">{sessions[0]?.title} · {exampleStep.name} was asked to run</div>
+                <pre className="max-h-48 overflow-auto rounded-md border bg-pane px-3 py-2.5 font-mono text-[12px] leading-relaxed break-words whitespace-pre-wrap text-foreground">{exampleStep.input}</pre>
+              </div>
+            )}
+            <div className="mb-1 text-[12px] text-faint">and got</div>
+            <p className="font-mono text-[13px] break-words text-fail">{errorDetail(example)}</p>
+            <Collapsible>
+              <CollapsibleTrigger className="group mt-1.5 flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground">
+                <ChevronRight className="size-3.5 transition-transform group-data-[state=open]:rotate-90" />
+                The full error
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <pre className="mt-1.5 max-h-64 overflow-auto rounded-md border bg-pane px-3 py-2.5 font-mono text-[12px] leading-relaxed break-words whitespace-pre-wrap text-foreground/90">
+                  {example.replace(/<\/?tool_use_error>/g, "").trim()}
+                </pre>
+              </CollapsibleContent>
+            </Collapsible>
           </section>
         )}
 
-        {g.issues.length > 1 && <Variants issues={g.issues} />}
+        {g.issues.length > 1 && <Variants issues={g.issues} messages={r.data.messages ?? {}} />}
 
         <SectionTitle aside={<span className="text-[12px] text-faint num">{plural(sessions.length, "session")} · all time, last active first</span>}>Sessions</SectionTitle>
         {sessions.length === 0 ? (

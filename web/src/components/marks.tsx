@@ -94,8 +94,16 @@ export function FailureStrip({ marks, count, className }: { marks: { at: number;
 }
 
 /** Whether an issue has a fix: "fix ready", "applied", or nothing. */
-export function FixMark({ fix }: { fix?: "ready" | "applied" | null }) {
-  if (fix === "applied") return <span className="inline-flex items-center gap-1 text-[12px] text-ok"><Check className="size-3" strokeWidth={2.5} />applied</span>;
+export function FixMark({ fix, at, lastSeen }: { fix?: "ready" | "applied" | null; at?: string | null; lastSeen?: string }) {
+  // An applied fix is not a fixed issue: say whether the issue came back after it.
+  if (fix === "applied") {
+    const since = at && lastSeen && lastSeen > at;
+    return since ? (
+      <span className="text-[12px] text-fail" title={`Fix applied ${at.slice(0, 10)}; the issue happened again after it.`}>seen since fix</span>
+    ) : (
+      <span className="inline-flex items-center gap-1 text-[12px] text-ok" title={at ? `Fix applied ${at.slice(0, 10)}` : undefined}><Check className="size-3" strokeWidth={2.5} />not seen since fix</span>
+    );
+  }
   if (fix === "ready") return <span className="inline-flex items-center gap-1 text-[12px] text-foreground"><Wrench className="size-3" />fix ready</span>;
   return null;
 }

@@ -153,9 +153,11 @@ export function Effect({ s }: { s: Suggestion }) {
   if (!e || s.causes.length === 0) return null;
   const before = e.before.sessions ? e.before.hit / e.before.sessions : 0;
   const since = e.since.sessions ? e.since.hit / e.since.sessions : 0;
+  // Whose numbers these are: this issue alone (on its page), or any of the issues the fix covers.
+  const whose = s.effectScope === "issue" ? "this issue" : s.causes.length > 1 ? `any of its ${s.causes.length} issues` : "it";
   return (
     <p className="mt-1 text-[12px] text-muted-foreground num">
-      Before: {e.before.hit} of {plural(e.before.sessions, "session")} hit it · since:{" "}
+      Before (30 days): {e.before.hit} of {plural(e.before.sessions, "session")} hit {whose} · since:{" "}
       <span className={e.since.sessions === 0 ? "text-faint" : since < before ? "text-ok" : since > 0 ? "text-warn" : "text-ok"}>
         {e.since.sessions === 0 ? "no session yet" : `${e.since.hit} of ${plural(e.since.sessions, "session")}`}
       </span>

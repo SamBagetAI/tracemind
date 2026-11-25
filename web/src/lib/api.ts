@@ -32,7 +32,7 @@ export type Session = {
   issues?: SessionIssue[];
 };
 
-export type SessionIssue = { what: string; seq: number; key: string };
+export type SessionIssue = { what: string; seq: number; key: string; named?: boolean };
 
 export type Step = {
   seq: number;
@@ -49,7 +49,7 @@ export type Step = {
 export type MemoryEvent = { seq: number; source: "instructions" | "file" | "skill" | "mcp"; op: "read" | "write"; ref: string; preview: string; at: string };
 export type Finding = { key: string; kind: IssueKind; title: string; seq: number };
 /** An issue a session hit, with its cause's session count (all variants) over the window. */
-export type IssueRef = { status: "open" | "resolved"; num: number; sessions: number; cause?: string; what?: string; fix?: "ready" | "applied" | null };
+export type IssueRef = { status: "open" | "resolved"; num: number; sessions: number; cause?: string; what?: string; fix?: "ready" | "applied" | null; fixAt?: string | null };
 
 export type Trace = {
   session: Session;
@@ -93,6 +93,8 @@ export type IssueGroup = {
   issues: (Issue & { windowSessions: number; tool: string })[];
   /** Whether a suggested change exists for this cause, and whether it was applied. */
   fix?: "ready" | "applied" | null;
+  /** When the fix was applied, if it was. */
+  fixAt?: string | null;
   /** Sessions in the period of the same length just before the window. */
   previous?: number;
 };
@@ -102,6 +104,8 @@ export type CauseDetail = {
   allTimeSessions: number;
   history: { day: string; sessions: number }[];
   example: string | null;
+  exampleStep: { name: string; input: string } | null;
+  messages: Record<string, string>;
   sessions: { id: string; title: string; project: string; person: string; startedAt: string; endedAt: string; seq: number }[];
   suggestion: Suggestion | null;
 };
@@ -149,6 +153,8 @@ export type Suggestion = {
   status: "open" | "applied" | "dismissed";
   at: string | null;
   effect: { before: { sessions: number; hit: number }; since: { sessions: number; hit: number } } | null;
+  /** "issue" when the numbers are for one issue only (on that issue's page). */
+  effectScope?: "issue";
 };
 
 export type Preview =

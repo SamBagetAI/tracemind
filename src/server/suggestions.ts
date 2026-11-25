@@ -329,7 +329,7 @@ export async function buildSuggestions(store: Store, ws: string, local: boolean,
 }
 
 /** Sessions that hit any of the causes, in the 30 days before `at` and since. */
-async function effect(store: Store, ws: string, causes: string[], at: string) {
+export async function effect(store: Store, ws: string, causes: string[], at: string) {
   const window = async (from: string, to: string) => {
     const [total] = await store.db.all<Row>("SELECT CAST(COUNT(*) AS INTEGER) AS c FROM sessions WHERE workspace = ? AND started_at >= ? AND started_at < ?", [ws, from, to]);
     if (causes.length === 0) return { sessions: Number(total?.c ?? 0), hit: 0 };

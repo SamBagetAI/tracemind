@@ -11,7 +11,7 @@ function toolsLead(sorted: Tool[], days: number): string {
   const top = sorted.find((t) => t.errors > 0 && t.calls >= FEW);
   const clean = sorted.filter((t) => t.errors === 0).length;
   const head = top
-    ? `${toolLabel(top.name)} fails most often: ${num(top.errors)} of ${num(top.calls)} calls (${percent(top.errors / top.calls)}) in the last ${days} days.`
+    ? `${sorted.filter((t) => toolLabel(t.name) === toolLabel(top.name)).length > 1 ? top.name : toolLabel(top.name)} fails most often: ${num(top.errors)} of ${num(top.calls)} calls (${percent(top.errors / top.calls)}) in the last ${days} days.`
     : `No tool with ${FEW}+ calls failed in the last ${days} days.`;
   return `${head} ${clean} of ${sorted.length} tools never failed.`;
 }

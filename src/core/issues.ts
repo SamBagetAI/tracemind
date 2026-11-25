@@ -65,6 +65,12 @@ function isErrorReport(line: string): boolean {
  * then the last error-like line (errors come at the end), then the exit code.
  */
 export function signature(output: string): string {
+  const n = normalize(errorLine(output));
+  return n.length > SIG_MAX ? `${n.slice(0, SIG_MAX)}…` : n;
+}
+
+/** The line of an error that says what went wrong, as it was written (signature() normalizes it). */
+export function errorLine(output: string): string {
   const toolError = /<tool_use_error>([\s\S]*?)<\/tool_use_error>/.exec(output);
   const text = toolError ? toolError[1] : output;
   const lines = text
@@ -86,8 +92,7 @@ export function signature(output: string): string {
       candidates[0] ??
       lines[0] ??
       "");
-  const n = normalize(chosen);
-  return n.length > SIG_MAX ? `${n.slice(0, SIG_MAX)}…` : n;
+  return chosen;
 }
 
 /** Words whose whole segment is set-up or a loop/test header, not a program running. */

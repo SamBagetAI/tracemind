@@ -16,6 +16,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useApi, type Finding, type IssueRef, type MemoryEvent, type Session, type Step, type Trace } from "@/lib/api";
 import { compact, describeIssue, duration, elapsed, fullDate, num, plainText, plural, projectName, sessionsLevel, LEVEL_CLASS, shortPath, memoryLabel, splitPath, when } from "@/lib/format";
+import { activeLabel } from "@/lib/diary";
 import { buildRows, commandLine, diagnosis, errorDetail, failureAnchors, findingsByCause, foldSummary, nextAnchor, startFiles, timeline, type Row } from "@/lib/trace";
 import { cn } from "@/lib/utils";
 import { useWindow } from "@/lib/window";
@@ -84,7 +85,7 @@ function TimeStrip({ steps, toolCalls, onJump }: { steps: Step[]; toolCalls: num
       </div>
       <div className="flex justify-between pt-1 text-[12px] text-faint num">
         <span>{scale === "step" ? "step 1" : "+0:00"}</span>
-        <span>{scale === "step" ? `step ${num(steps[steps.length - 1]?.seq ?? 0)} · ${elapsed(tl.total)}` : elapsed(tl.total)}</span>
+        <span>{scale === "step" ? `step ${num(steps[steps.length - 1]?.seq ?? 0)} · ${elapsed(tl.total)} after the first` : `${elapsed(tl.total)} after the first step`}</span>
       </div>
     </div>
   );
@@ -309,7 +310,7 @@ function SidePanel({ t, onJump }: { t: Trace; onJump: (seq: number) => void }) {
                     <span className="mt-0.5 flex items-center gap-2 text-[12px] text-faint num">
                       <button type="button" onClick={() => onJump(f.seq)} className="hover:text-foreground hover:underline">step {num(f.seq)}</button>
                       {ref && <span className={ref.sessions > 1 ? LEVEL_CLASS[sessionsLevel(ref.sessions)] : ""}>{plural(ref.sessions, "session")}</span>}
-                      <FixMark fix={ref?.fix} />
+                      <FixMark fix={ref?.fix} at={ref?.fixAt} lastSeen={t.session.endedAt} />
                     </span>
                   </li>
                 );
@@ -371,7 +372,8 @@ function Header({ t, nav }: { t: Trace; nav: ReturnType<typeof useNeighbours> })
   const s = t.session;
   const d = diagnosis(t);
   const navigate = useNavigate();
-  const meta = [s.person, s.gitBranch, s.model, duration(Date.parse(s.endedAt) - Date.parse(s.startedAt)), `${compact(s.inputTokens)} in · ${compact(s.outputTokens)} out`].filter(Boolean);
+  // Two kinds of time, each said: active (gaps up to 15 minutes, as on the Diary) and first to last step.
+  const meta = [s.person, s.gitBranch, s.model, `${activeLabel(s.activeMs)} active`, `${duration(Date.parse(s.endedAt) - Date.parse(s.startedAt))} first to last step`, `${compact(s.inputTokens)} in · ${compact(s.outputTokens)} out`].filter(Boolean);
   return (
     <div className="pt-5 pb-4">
       <div className="mb-2 flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2">
