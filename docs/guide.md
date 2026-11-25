@@ -8,7 +8,7 @@ tools, fixes, what counts as an issue, privacy, and how to work on the code.
 Needs Node 22.13 or later.
 
 ```bash
-npm install -g tracemind        # or, from this repo: pnpm install && pnpm build && npm link
+pnpm install && pnpm build && npm link   # from a clone of this repo (not on npm yet)
 tracemind setup claude-code     # adds a Stop and a SessionEnd hook to ~/.claude/settings.json
 tracemind import                # loads your sessions from the last 30 days
 tracemind ui                    # opens http://localhost:4545
