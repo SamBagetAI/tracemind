@@ -5,7 +5,7 @@
 @import "@fontsource/ibm-plex-mono/500.css";
 
 /*
- * Tracemind's tokens, from DESIGN.md section 12: warm paper and ink, Schibsted Grotesk for words,
+ * Tracemind's tokens, from DESIGN.md section 12: white paper and ink, Schibsted Grotesk for words,
  * IBM Plex Mono for machine text, a highlighter mark for what went wrong, red only for failure.
  * shadcn/ui components read these. The dark set is kept for anyone who turns it on.
  */
@@ -14,31 +14,31 @@
 
 :root {
   --radius: 6px;
-  --background: #fbf8f1;
+  --background: #ffffff;
   --foreground: #1d1b18;
-  --pane: #f5f1e7;
-  --raise: #efe9dc;
-  --card: #fffdf8;
+  --pane: #f6f6f5;
+  --raise: #efefed;
+  --card: #ffffff;
   --card-foreground: #1d1b18;
-  --popover: #fffdf8;
+  --popover: #ffffff;
   --popover-foreground: #1d1b18;
   --primary: #1d1b18;
-  --primary-foreground: #fbf8f1;
-  --secondary: #efe9dc;
+  --primary-foreground: #ffffff;
+  --secondary: #efefed;
   --secondary-foreground: #1d1b18;
-  --muted: #f0ebdf;
-  --muted-foreground: #6d685f;
-  --faint: #8f897d;
-  --accent: #f0eadc;
+  --muted: #f3f3f2;
+  --muted-foreground: #6b6b68;
+  --faint: #8d8d89;
+  --accent: #f1f1ef;
   --accent-foreground: #1d1b18;
   --destructive: #b8322b;
   --fail: #b8322b;
   --warn: #9a6400;
   --ok: #3f7f52;
   --mark: #ffe58a;
-  --border: #e9e2d3;
-  --input: #ddd5c4;
-  --ring: #a59d8d;
+  --border: #e6e6e3;
+  --input: #d9d9d5;
+  --ring: #a1a19c;
 }
 
 .dark {

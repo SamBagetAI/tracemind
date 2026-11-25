@@ -8,7 +8,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { api, useApi, type Session, type Viewer } from "@/lib/api";
 import { projectName, when } from "@/lib/format";
-import { Mark } from "@/components/marks";
 import { cn } from "@/lib/utils";
 import { WINDOWS, useWindow, type Days } from "@/lib/window";
 
@@ -83,7 +82,7 @@ export function Shell({ children }: { children: ReactNode }) {
       <header className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur-sm">
         <div className="flex h-11 items-center gap-1 px-3 sm:px-4">
           <NavLink to="/" aria-label="Tracemind" className="mr-1 flex shrink-0 items-center gap-2 font-medium tracking-tight sm:mr-4">
-            <Mark />
+            <img src="/slug.svg" alt="" className="h-8 w-auto" />
             <span className="hidden md:inline">Tracemind</span>
           </NavLink>
 

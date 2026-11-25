@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/mascot.svg" width="200" alt="Tracemind's slug, crawling with its big brain on its back and leaving a trace"></p>
+<p align="center"><img src="web/public/slug.svg" width="200" alt="Tracemind's slug, crawling with its big brain on its back and leaving a trace"></p>
 
 <h1 align="center">Tracemind</h1>
 
