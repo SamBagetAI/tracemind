@@ -14,7 +14,6 @@ export const KIND: Record<IssueKind, string> = {
   interrupted: "Stopped",
 };
 
-/** Known error signatures, said the way a person would. Order matters: the first match wins. */
 /**
  * Causes other code acts on by name (fixes, the brief, advice). Named here once, so rewording one
  * cannot quietly switch those off.
@@ -35,6 +34,7 @@ export const CAUSE = {
 /** How a sentence names an error that has no plain name yet. */
 export const UNNAMED = "an error without a name yet";
 
+/** Known error signatures, said the way a person would. Order matters: the first match wins. */
 const PLAIN: [RegExp, string][] = [
   [/denied by the claude code aut|auto mode classifier/i, CAUSE.classifier],
   [/blocked: sleep/i, CAUSE.sleep],
@@ -96,7 +96,7 @@ export function describeIssue(issue: { kind: IssueKind; title: string }): Descri
 
 /**
  * The cause an issue belongs to. A named cause is one cause whatever kind it was filed under
- * (CAUSE.classifier can come back as a refusal or as a tool's error); an
+ * ("Refused by the auto-mode classifier" can come back as a refusal or as a tool's error); an
  * unnamed one keeps its kind. Pass `d` when the issue was already described, to skip doing it twice.
  */
 export function causeKey(issue: { kind: IssueKind; title: string }, d = describeIssue(issue)): string {

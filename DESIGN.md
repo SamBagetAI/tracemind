@@ -374,8 +374,8 @@ effect on one screen, and visuals that can be read instead of only looked at.
 - Memory folds files used in fewer than 3 sessions into one line, and names its sections for what they are:
   "Loaded at session start", "Read or written by the agent".
 
-**Identity.** The mark is a small time strip: a prompt, steps and one failure, as on a session page. It is
-the logo and the favicon.
+**Identity.** The mark is the slug (`web/public/slug.svg`): a slug carrying a big brain, leaving a trace with
+one failure in it. It is the logo in the header, the favicon and the README's mascot.
 
 **Smaller fixes.**
 - Step numbers have thousands separators.

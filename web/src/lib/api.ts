@@ -31,7 +31,7 @@ export type Trace = {
   issues: Record<string, IssueRef>;
   /** The window the issue counts cover, or null for all time (the session is older than the window). */
   issueWindow?: number | null;
-  /** Its neighbours among the person's sessions of the same kind, newest first, and where it sits among them. */
+  /** Its neighbours among the newest 1000 sessions of any kind, newest first (in the window when it is), and where it sits among them. */
   nav: { newer: string | null; older: string | null; index: number; total: number } | null;
 };
 
