@@ -1,5 +1,5 @@
 /** The strip under a session's header: every step as a mark, by step or by time; click one to jump to it. */
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Step } from "@/lib/api";
@@ -7,7 +7,8 @@ import { duration, elapsed, num, plural } from "@/lib/format";
 import { timeline } from "@/lib/trace";
 import { cn } from "@/lib/utils";
 
-export function TimeStrip({ steps, toolCalls, onJump }: { steps: Step[]; toolCalls: number; onJump: (seq: number) => void }) {
+/** Memoized: up to 400 marks with a tooltip each, which opening a row below must not render again. */
+export const TimeStrip = memo(function TimeStrip({ steps, toolCalls, onJump }: { steps: Step[]; toolCalls: number; onJump: (seq: number) => void }) {
   const [scale, setScale] = useState<"step" | "time">("step");
   const tl = useMemo(() => timeline(steps, scale), [steps, scale]);
   const marks = useMemo(() => {
@@ -73,4 +74,4 @@ export function TimeStrip({ steps, toolCalls, onJump }: { steps: Step[]; toolCal
       </div>
     </div>
   );
-}
+});

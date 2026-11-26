@@ -104,6 +104,22 @@ export async function touchIssue(db: Db, ws: string, f: Finding, startedAt: stri
   }
 }
 
+/**
+ * Sets issues' first and last seen from the sessions that have them now: when the earliest started
+ * and the latest ended. Saving a session only ever widens the two (touchIssue), so this is for when
+ * sessions stop having an issue: an import that names an error differently. An issue no session has
+ * keeps its dates. With `ws`, that workspace's issues only.
+ */
+export async function redateIssues(db: Db, ws?: string) {
+  const seen = (pick: string) =>
+    `(SELECT ${pick} FROM findings f JOIN sessions s ON s.workspace = f.workspace AND s.id = f.session_id
+       WHERE f.workspace = issues.workspace AND f.key = issues.key)`;
+  await db.run(
+    `UPDATE issues SET first_seen = COALESCE(${seen("MIN(s.started_at)")}, first_seen), last_seen = COALESCE(${seen("MAX(s.ended_at)")}, last_seen)${ws === undefined ? "" : " WHERE workspace = ?"}`,
+    ws === undefined ? [] : [ws],
+  );
+}
+
 export async function issues(db: Db, ws: string) {
   const rows = await db.all(
     `SELECT i.*, CAST((SELECT COUNT(*) FROM findings f WHERE f.workspace = i.workspace AND f.key = i.key) AS INTEGER) AS sessions

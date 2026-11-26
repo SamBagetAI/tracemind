@@ -268,8 +268,12 @@ Next:
         }
         if (process.stdout.isTTY) process.stdout.write(`\rImporting ${i + 1}/${files.length}`);
       }
+      // An import can name an error differently than before: drop the issues no session has any
+      // more, and date the others from the sessions that still have them.
       const { pruneIssues } = await import("../store/insights.ts");
+      const { redateIssues } = await import("../store/issues.ts");
       await pruneIssues(store, WS);
+      await redateIssues(store.db, WS);
       await store.db.close();
       console.log(`${process.stdout.isTTY ? "\n" : ""}Imported ${saved} sessions from the last ${days} days${errors ? `, ${errors} could not be read (see ${logPath()})` : ""}.`);
       return;

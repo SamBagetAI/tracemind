@@ -1,6 +1,6 @@
 /** The rows of a session's trace: a step (or a run of identical failures), a fold of quiet steps, and what was loaded at the start. */
 import { ChevronRight, Copy, X } from "lucide-react";
-import type { ReactNode } from "react";
+import { memo, useMemo } from "react";
 import { Link } from "react-router";
 import { copyText } from "@/components/change";
 import { Button } from "@/components/ui/button";
@@ -93,7 +93,18 @@ function IssueLine({ finding, issue, window }: { finding?: Finding; issue?: Issu
   );
 }
 
-export function StepRow({ row, t0, open, onToggle, memory, issueWindow, current }: { row: Extract<Row, { type: "step" | "repeat" }>; t0: number; open: boolean; onToggle: () => void; memory: Map<number, MemoryEvent[]>; issueWindow: number | null; current?: boolean }) {
+/**
+ * What the page hands every row. Each is the same value from one render of the page to the next, so
+ * a memoized row renders again only when the row itself changes. `onToggle` opens or closes a row by
+ * its key: a step's number, or minus a fold's first step.
+ */
+type Shared = { t0: number; onToggle: (key: number) => void; memory: Map<number, MemoryEvent[]>; issueWindow: number | null };
+
+/**
+ * A step, or a run of steps that failed the same way. Memoized: a long session has thousands of
+ * rows, and opening one must render that one, not all of them.
+ */
+export const StepRow = memo(function StepRow({ row, t0, open, onToggle, memory, issueWindow, current }: Shared & { row: Extract<Row, { type: "step" | "repeat" }>; open: boolean; current?: boolean }) {
   const steps = row.type === "repeat" ? row.steps : [row.step];
   const first = steps[0];
   const last = steps[steps.length - 1];
@@ -119,7 +130,7 @@ export function StepRow({ row, t0, open, onToggle, memory, issueWindow, current 
   const stepMemory = steps.flatMap((s) => memory.get(s.seq) ?? []);
 
   return (
-    <Collapsible open={open} onOpenChange={onToggle} asChild>
+    <Collapsible open={open} onOpenChange={() => onToggle(first.seq)} asChild>
       <li id={`s-${first.seq}`} className={cn("relative scroll-mt-20", failed && "before:absolute before:inset-y-0 before:left-0 before:w-[2px] before:bg-fail", current && "ring-1 ring-fail/50 ring-inset")}>
         <CollapsibleTrigger asChild disabled={!expandable}>
           <div
@@ -179,29 +190,40 @@ export function StepRow({ row, t0, open, onToggle, memory, issueWindow, current 
       </li>
     </Collapsible>
   );
-}
+});
 
-export function FoldRow({ steps, open, onToggle, children }: { steps: Step[]; open: boolean; onToggle: () => void; children: ReactNode }) {
+/**
+ * A stretch of steps that went fine, as one line that opens. `opened` is the page's open rows when
+ * this fold is open and null when it is closed, so a closed fold is handed nothing that changes when
+ * another row opens, and does not render again.
+ */
+export const FoldRow = memo(function FoldRow({ steps, opened, ...shared }: Shared & { steps: Step[]; opened: Set<number> | null }) {
   const a = steps[0].seq;
   const b = steps[steps.length - 1].seq;
   return (
     <li>
       <button
         type="button"
-        onClick={onToggle}
-        aria-expanded={open}
+        onClick={() => shared.onToggle(-a)}
+        aria-expanded={!!opened}
         className={cn(GRID, "w-full border-y border-dashed py-1.5 text-left text-muted-foreground transition-colors hover:bg-accent hover:text-foreground")}
       >
         <span className="text-right text-[12px] whitespace-nowrap text-faint num">{num(a)}–{num(b)}</span>
         <span className="hidden sm:block" />
-        <ChevronRight className={cn("size-3.5 self-center transition-transform", open && "rotate-90")} />
+        <ChevronRight className={cn("size-3.5 self-center transition-transform", opened && "rotate-90")} />
         <span className="col-span-1 truncate sm:col-span-3">
           {plural(steps.length, "step")} went fine
           <span className="text-[12px] text-faint"> · <span className="font-mono text-[11px]">{foldSummary(steps)}</span></span>
         </span>
         <span className="text-right text-[12px] text-faint num">{duration(steps.reduce((n, s) => n + (s.durationMs ?? 0), 0))}</span>
       </button>
-      {open && <ul>{children}</ul>}
+      {opened && <FoldSteps steps={steps} opened={opened} {...shared} />}
     </li>
   );
+});
+
+/** The steps of an open fold. Each keeps the same row object between renders, so its row stays memoized. */
+function FoldSteps({ steps, opened, ...shared }: Shared & { steps: Step[]; opened: Set<number> }) {
+  const rows = useMemo(() => steps.map((step) => ({ type: "step" as const, step })), [steps]);
+  return <ul>{rows.map((r) => <StepRow key={r.step.seq} row={r} open={opened.has(r.step.seq)} {...shared} />)}</ul>;
 }

@@ -1,12 +1,28 @@
 /** Creates the tables and brings databases made by older versions up to date. */
 import { ROUTINE_AGENT, routineRunId, routineSessionOf } from "../core/parse-routine.ts";
 import type { Db, Row } from "./db.ts";
-import { autoResolve } from "./issues.ts";
+import { autoResolve, redateIssues } from "./issues.ts";
 import { deleteSession, n, SESSION_TABLES } from "./rows.ts";
 import { SCHEMA } from "./schema.ts";
 
+/**
+ * The version a database is at once every step below has run on it. Every hook, command and cold
+ * start calls migrate(): it reads the version and stops there when it is current, so each step runs
+ * once per database. To add a step, raise this and run the step for databases below the new number.
+ */
+const VERSION = 1;
+
 export async function migrate(db: Db) {
   await db.exec(SCHEMA);
+  const [kept] = await db.all<Row>("SELECT value FROM meta WHERE key = 'schema_version'");
+  const from = n(kept?.value);
+  if (from >= VERSION) return;
+  if (from < 1) await fromBeforeVersions(db);
+  await db.run("INSERT INTO meta (key, value) VALUES ('schema_version', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value", [String(VERSION)]);
+}
+
+/** Version 1: what a database made before versions were kept may still need. Safe to run again. */
+async function fromBeforeVersions(db: Db) {
   // Issue numbers came after the first release: add the column to older databases and number
   // the issues they already have, oldest first.
   try {
@@ -52,13 +68,7 @@ export async function migrate(db: Db) {
     });
   }
   // Repair first/last seen from the sessions (older versions kept the first-saved session's date).
-  await db.run(
-    `UPDATE issues SET
-       first_seen = COALESCE((SELECT MIN(s.started_at) FROM findings f JOIN sessions s ON s.workspace = f.workspace AND s.id = f.session_id
-                               WHERE f.workspace = issues.workspace AND f.key = issues.key), first_seen),
-       last_seen = COALESCE((SELECT MAX(s.ended_at) FROM findings f JOIN sessions s ON s.workspace = f.workspace AND s.id = f.session_id
-                              WHERE f.workspace = issues.workspace AND f.key = issues.key), last_seen)`,
-  );
+  await redateIssues(db);
   // Issues that stopped happening before Tracemind resolved them on its own.
   const spaces = await db.all<Row>("SELECT DISTINCT workspace FROM issues WHERE status = 'open'");
   for (const r of spaces) await autoResolve(db, String(r.workspace));
