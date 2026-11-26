@@ -36,6 +36,16 @@ type Env = { Variables: { viewer: Viewer } };
 
 const COOKIE = "tm_token";
 
+/**
+ * Sent with everything this app answers. On Vercel the pages are static files that never reach it,
+ * so vercel.json sends them the same ones (test/deploy.test.ts keeps the two alike).
+ */
+export const SECURITY_HEADERS: Record<string, string> = {
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "same-origin",
+  "x-frame-options": "DENY",
+};
+
 const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -104,9 +114,7 @@ export function createApp(opts: AppOptions) {
 
   app.use("*", async (c, next) => {
     await next();
-    c.header("x-content-type-options", "nosniff");
-    c.header("referrer-policy", "same-origin");
-    c.header("x-frame-options", "DENY");
+    for (const [name, value] of Object.entries(SECURITY_HEADERS)) c.header(name, value);
   });
 
   // The local app has no sign-in: it answers only to a localhost name, so a web page that re-points

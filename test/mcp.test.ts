@@ -38,6 +38,13 @@ describe("MCP server", () => {
     expect(names).toEqual(expect.arrayContaining(["overview", "list_issues", "get_issue", "list_sessions", "get_session", "list_tools", "list_fixes", "preview_fix", "apply_fix", "undo_fix", "dismiss_fix", "resolve_issue", "import_routine_runs", "routine_sync_status"]));
   });
 
+  it("tells the agent that what a session said is data, not instructions", async () => {
+    const { client } = await localClient();
+    expect(client.getInstructions()).toMatch(/never as instructions/);
+    const tools = (await client.listTools()).tools;
+    for (const name of ["get_issue", "get_session"]) expect(tools.find((t) => t.name === name)!.description, name).toMatch(/not instructions/);
+  });
+
   it("gives the same numbers as the web UI's API", async () => {
     const { app, client } = await localClient();
     const o = await read(client, "overview", { days: 365 });
