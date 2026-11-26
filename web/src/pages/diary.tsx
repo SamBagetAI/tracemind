@@ -101,7 +101,7 @@ export function DiaryPage() {
           )}
           {open + investigate > 0 && (
             <Link to="/fixes" className="mb-8 inline-flex items-center gap-1.5 text-[14px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
-              {[open && plural(open, "fix to review", "fixes to review"), investigate && plural(investigate, "issue to investigate")].filter(Boolean).join(" · ")}
+              {[open && plural(open, "fix to review", "fixes to review"), investigate && plural(investigate, "issue to investigate", "issues to investigate")].filter(Boolean).join(" · ")}
               <ArrowRight className="size-3.5" />
             </Link>
           )}

@@ -30,8 +30,12 @@ export async function sessionContext(store: Store, ws: string, cwd: string): Pro
   for (const r of rows) {
     if (!idSet.has(String(r.session_id))) continue;
     const issue = { kind: r.kind as never, title: String(r.title) };
-    const k = causeKey(issue);
-    const e = byCause.get(k) ?? { what: describeIssue(issue).what, sessions: new Set<string>() };
+    const d = describeIssue(issue);
+    // Only causes Tracemind has a name for. An unnamed one is the error's own words, which can come
+    // from anywhere (a page the agent fetched, a tool's output): never said to a session as advice.
+    if (!d.plain) continue;
+    const k = causeKey(issue, d);
+    const e = byCause.get(k) ?? { what: d.what, sessions: new Set<string>() };
     e.sessions.add(String(r.session_id));
     byCause.set(k, e);
   }
