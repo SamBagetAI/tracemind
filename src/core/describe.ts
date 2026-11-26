@@ -103,6 +103,21 @@ export function causeKey(issue: { kind: IssueKind; title: string }, d = describe
   return d.plain ? d.what : `${issue.kind}|${d.what}`;
 }
 
+/**
+ * Whether the session-start brief may name a cause, and so whether the brief counts as a fix for it.
+ * A cause Tracemind has a name for (never an error's own words, which can come from anywhere: a page
+ * the agent fetched, a tool's output), that is not a person stopping the agent, and not a bare exit
+ * code (mostly grep or a test finding nothing: not worth a new session's attention).
+ */
+export function inBrief(d: { plain: boolean; what: string }): boolean {
+  return d.plain && d.what !== CAUSE.stopped && d.what !== CAUSE.exitCode;
+}
+
+/** The same, from a cause's id (causeKey): a named cause's id is its name, an unnamed one starts with its kind. */
+export function inBriefById(id: string): boolean {
+  return inBrief({ plain: !Object.keys(KIND).some((kind) => id.startsWith(`${kind}|`)), what: id });
+}
+
 /** The tool family for display: "Bash git" → "git", "claude-in-chrome/navigate" → "navigate". */
 export function toolLabel(tool: string): string {
   if (tool.startsWith("Bash ")) return tool.slice(5);

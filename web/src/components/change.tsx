@@ -160,7 +160,8 @@ function Effect({ s }: { s: Suggestion }) {
 
 /**
  * Whether the session-start brief is doing its job, from the sessions that started since it was
- * installed: each transcript records whether the hook ran and what it said.
+ * installed: the hook notes what it did in each (given, or nothing to report), and the transcript
+ * shows a failure. A session with neither is one where it did not run.
  */
 function BriefCheck({ s }: { s: Suggestion }) {
   const c = s.checks;

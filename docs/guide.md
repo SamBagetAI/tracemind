@@ -77,13 +77,15 @@ recorded: the server tells the agent to read it as data, never as instructions.
 The Fixes page turns what keeps going wrong into changes to how Claude is used:
 - **A rule:** added to your global `~/.claude/CLAUDE.md` or to a project's CLAUDE.md or AGENTS.md.
 - **A routine:** a SessionStart hook that tells each new session what keeps going wrong in its project.
-  It names only the causes Tracemind recognises, never an error's own words.
+  It names only the causes Tracemind recognises (never an error's own words, and not a bare exit
+  code), and counts as a fix for those only.
 - **A prompt to hand to Claude:** for things that need a person, such as signing a connector in or trimming a file that is too big.
 
 Every file change is previewed first, backed up, and can be undone. Once the session-start brief is
-installed, Tracemind checks it in every session that starts after: the transcript records whether the hook
-ran and what it said, and the Fixes page shows "given to N of M sessions", or says it failed. Once a suggestion is applied, the page shows
-how often the problem happened before and since. Changes are only made from the local app, on localhost.
+installed, Tracemind checks it in every session that starts after. The hook notes what it did, since
+Claude Code itself records it only when it says something, and the Fixes page shows "given to N of M
+sessions", how many had nothing to report, or says it failed. Once a suggestion is applied, the page
+shows how often the problem happened before and since. Changes are only made from the local app, on localhost.
 
 ## What it finds
 

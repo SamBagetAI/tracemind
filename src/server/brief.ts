@@ -1,5 +1,5 @@
 /** The session-start brief: what a Claude Code hook tells each new session about its project. */
-import { CAUSE, causeKey, describeIssue } from "../core/describe.ts";
+import { CAUSE, causeKey, describeIssue, inBrief } from "../core/describe.ts";
 import { daysAgo } from "../core/time.ts";
 import type { Row } from "../store/db.ts";
 import type { Store } from "../store/store.ts";
@@ -23,7 +23,7 @@ export async function sessionContext(store: Store, ws: string, cwd: string): Pro
   const rows = await store.db.all<Row>(
     `SELECT f.key, f.session_id, i.kind, i.title FROM findings f JOIN issues i ON i.workspace = f.workspace AND i.key = f.key
        JOIN sessions s ON s.workspace = f.workspace AND s.id = f.session_id
-      WHERE f.workspace = ? AND s.started_at >= ? AND i.kind <> 'interrupted' AND i.status = 'open'`,
+      WHERE f.workspace = ? AND s.started_at >= ? AND i.status = 'open'`,
     [ws, since],
   );
   const byCause = new Map<string, { what: string; sessions: Set<string> }>();
@@ -31,17 +31,15 @@ export async function sessionContext(store: Store, ws: string, cwd: string): Pro
     if (!idSet.has(String(r.session_id))) continue;
     const issue = { kind: r.kind as never, title: String(r.title) };
     const d = describeIssue(issue);
-    // Only causes Tracemind has a name for. An unnamed one is the error's own words, which can come
-    // from anywhere (a page the agent fetched, a tool's output): never said to a session as advice.
-    if (!d.plain) continue;
+    // Only what the brief may name (inBrief): never an error's own words, a stop or a bare exit code.
+    if (!inBrief(d)) continue;
     const k = causeKey(issue, d);
     const e = byCause.get(k) ?? { what: d.what, sessions: new Set<string>() };
     e.sessions.add(String(r.session_id));
     byCause.set(k, e);
   }
-  // A bare exit code is mostly grep or a test finding nothing: not worth a new session's attention.
   const top = [...byCause.values()]
-    .filter((e) => e.sessions.size >= 3 && e.what !== CAUSE.exitCode)
+    .filter((e) => e.sessions.size >= 3)
     .sort((a, b) => b.sessions.size - a.sessions.size)
     .slice(0, 5);
   if (top.length === 0) return "";
