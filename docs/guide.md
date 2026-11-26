@@ -33,6 +33,9 @@ The server is the same app on Postgres, with workspaces and tokens.
 3. Send what you have: `tracemind push`. New sessions are sent when Claude Code saves them.
 4. Invite a teammate: `tracemind cloud token --person "Grace"`. They run
    `tracemind cloud link --url https://your-server --token <token>`.
+5. Take a token back when someone leaves or a laptop is lost: `tracemind cloud tokens` lists who
+   holds one and when it was last used, and `tracemind cloud revoke <id>` ends it at once, in the
+   browser too. The last admin token of a workspace cannot be revoked.
 
 People sign in to the web UI with their token. On a server, a session is filed under the person
 who owns the token that sent it, whatever the client says.

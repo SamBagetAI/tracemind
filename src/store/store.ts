@@ -6,7 +6,7 @@ import { autoResolve, issue, issues, setIssueStatus, touchIssue } from "./issues
 import { migrate } from "./migrate.ts";
 import { deleteSession, insertMany, kindClause, n, now, toSession, type IssueRef, type IssueRow, type SessionKind } from "./rows.ts";
 import { memory, overview, tools, totals } from "./stats.ts";
-import { createToken, tokenCount, tokenOwner } from "./tokens.ts";
+import { createToken, listTokens, revokeToken, tokenCount, tokenOwner } from "./tokens.ts";
 
 export { ROUTINE_AGENT, kindClause, n, type IssueRef, type IssueRow, type SessionKind } from "./rows.ts";
 export { AUTO_RESOLVER, QUIET_SESSIONS } from "./issues.ts";
@@ -223,5 +223,13 @@ export class Store {
 
   tokenCount() {
     return tokenCount(this.db);
+  }
+
+  tokens(ws: string) {
+    return listTokens(this.db, ws);
+  }
+
+  revokeToken(ws: string, id: string) {
+    return revokeToken(this.db, ws, id);
   }
 }

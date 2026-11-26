@@ -13,6 +13,7 @@ import { InvalidTrace, validateTrace } from "../core/validate.ts";
 import { daysAgo } from "../core/time.ts";
 import { causeCounts, causeDetail, causeKeys, failureMarks, issueGroupsWithPrevious, sessionIssues } from "../store/insights.ts";
 import type { SessionKind, Store } from "../store/store.ts";
+import { tokenId } from "../store/tokens.ts";
 import { sessionContext } from "./brief.ts";
 import { apply, preview, setState, undo } from "./fixes.ts";
 import { buildSuggestions, copyOf, effect } from "./suggestions.ts";
@@ -35,6 +36,13 @@ export type AppOptions = {
 type Env = { Variables: { viewer: Viewer } };
 
 const COOKIE = "tm_token";
+
+/** Why a token was not revoked, as the API says it. */
+const NOT_REVOKED = {
+  "not found": "no token with that id in this workspace",
+  ambiguous: "several tokens start with that id: give more of it",
+  "last admin": "that is the workspace's last admin token: create another admin first",
+} as const;
 
 /**
  * Sent with everything this app answers. On Vercel the pages are static files that never reach it,
@@ -141,9 +149,12 @@ export function createApp(opts: AppOptions) {
     return c.json({ token, workspace, person, role: "admin" });
   });
 
+  /** The token a request carries: sent by a command line or an agent, or kept by the browser after sign-in. */
+  const tokenOf = (c: Context): string | null => bearer(c) ?? getCookie(c, COOKIE) ?? null;
+
   const identify = async (c: Context<Env>): Promise<Viewer | null> => {
     if (mode === "local") return { workspace: "local", person: opts.localPerson ?? "me", role: "admin", mode };
-    const token = bearer(c) ?? getCookie(c, COOKIE) ?? null;
+    const token = tokenOf(c);
     if (!token) return null;
     const owner = await store.tokenOwner(token);
     return owner ? { ...owner, mode } : null;
@@ -375,14 +386,34 @@ export function createApp(opts: AppOptions) {
     }
   });
 
+  // ---- tokens: a shared server's, and an admin's to create, see and take back ----
+  const admin = (c: Context<Env>) => mode === "server" && c.get("viewer").role === "admin";
+
   api.post("/tokens", async (c) => {
     const v = c.get("viewer");
-    if (mode !== "server" || v.role !== "admin") return c.json({ error: "only an admin can create tokens" }, 403);
+    if (!admin(c)) return c.json({ error: "only an admin can create tokens" }, 403);
     const body = await c.req.json().catch(() => ({}));
     const person = String(body.person ?? "").trim();
     const role = body.role === "admin" ? "admin" : "member";
     if (!person || person.length > 120) return c.json({ error: "person is required" }, 400);
     return c.json({ token: await store.createToken(v.workspace, person, role), workspace: v.workspace, person, role });
+  });
+
+  // Who holds a token and when each was last used, with which one is asking. Never a token itself.
+  api.get("/tokens", async (c) => {
+    if (!admin(c)) return c.json({ error: "only an admin can list tokens" }, 403);
+    const token = tokenOf(c);
+    const mine = token ? tokenId(token) : null;
+    return c.json((await store.tokens(c.get("viewer").workspace)).map((t) => ({ ...t, current: t.id === mine })));
+  });
+
+  // Revoked, a token stops working at once, in the browser too. `current` says it was the caller's own.
+  api.delete("/tokens/:id", async (c) => {
+    if (!admin(c)) return c.json({ error: "only an admin can revoke tokens" }, 403);
+    const token = tokenOf(c);
+    const r = await store.revokeToken(c.get("viewer").workspace, c.req.param("id"));
+    if (r.outcome !== "revoked") return c.json({ error: NOT_REVOKED[r.outcome] }, r.outcome === "not found" ? 404 : 409);
+    return c.json({ ok: true, current: !!token && tokenId(token) === r.id });
   });
 
   api.all("*", (c) => c.json({ error: "not found" }, 404));

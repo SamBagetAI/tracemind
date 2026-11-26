@@ -273,6 +273,47 @@ describe("server mode", () => {
     // The command line sends its token, not a cookie: there is no site to check.
     expect((await app.request("http://h/api/ingest", json(trace(), { authorization: `Bearer ${token}` }))).status).toBe(200);
   });
+
+  it("lets an admin see who has a token and take one back", async () => {
+    const { app, store } = await serverApp();
+    const admin = await store.createToken("acme", "Ada", "admin");
+    const grace = await store.createToken("acme", "Grace", "member");
+    const as = (token: string) => ({ headers: { authorization: `Bearer ${token}` } });
+    const revoke = (id: string, token: string) => app.request(`/api/tokens/${id}`, { method: "DELETE", headers: { authorization: `Bearer ${token}` } });
+
+    // A member sees and revokes nothing.
+    expect((await app.request("/api/tokens", as(grace))).status).toBe(403);
+    const list = await (await app.request("/api/tokens", as(admin))).json();
+    expect(list.map((t: any) => t.person).sort()).toEqual(["Ada", "Grace"]);
+    // Enough to tell tokens apart, and nothing that could be used as one.
+    expect(Object.keys(list[0]).sort()).toEqual(["createdAt", "current", "id", "lastUsedAt", "person", "role"]);
+    expect(JSON.stringify(list)).not.toContain(grace.slice(3));
+    const ada = list.find((t: any) => t.person === "Ada");
+    const g = list.find((t: any) => t.person === "Grace");
+    expect(ada).toMatchObject({ role: "admin", current: true });
+    expect(g).toMatchObject({ role: "member", current: false });
+    expect((await revoke(g.id, grace)).status).toBe(403);
+    expect((await revoke("abcdef12", admin)).status).toBe(404);
+    // Not from another site with the sign-in cookie either.
+    expect((await app.request(`http://h/api/tokens/${g.id}`, { method: "DELETE", headers: { cookie: `tm_token=${admin}`, origin: "https://evil.example" } })).status).toBe(403);
+
+    // Revoked: Grace's token stops working at once.
+    expect(await (await revoke(g.id, admin)).json()).toEqual({ ok: true, current: false });
+    expect((await app.request("/api/me", as(grace))).status).toBe(401);
+    // The last admin token stays: without it no one could create or revoke tokens.
+    expect((await revoke(ada.id, admin)).status).toBe(409);
+    expect((await app.request("/api/me", as(admin))).status).toBe(200);
+    // With another admin, an admin can revoke their own, and is told it was theirs.
+    await store.createToken("acme", "Lin", "admin");
+    expect(await (await revoke(ada.id, admin)).json()).toEqual({ ok: true, current: true });
+    expect((await app.request("/api/me", as(admin))).status).toBe(401);
+  });
+
+  it("has no tokens to list or revoke in the local app", async () => {
+    const { app } = await localApp();
+    expect((await app.request("http://localhost/api/tokens")).status).toBe(403);
+    expect((await app.request("http://localhost/api/tokens/abcdef12", { method: "DELETE", headers: { origin: "http://localhost" } })).status).toBe(403);
+  });
 });
 
 describe("Claude Code hooks", () => {
