@@ -121,11 +121,11 @@ describe("suggestions", () => {
 
     // Three new sessions: the brief told one something, had nothing to say in one, and failed in one.
     const later = Date.now() + 60_000;
-    const withHook = (id: string, n: number, attachment: object) => {
+    const withHook = (id: string, n: number, attachment?: object) => {
       const base = { sessionId: id, cwd: project, isSidechain: false };
       const t = (s: number) => new Date(later + n * 600_000 + s * 1000).toISOString();
       const lines = [
-        { ...base, type: "attachment", timestamp: t(0), attachment: { hookEvent: "SessionStart", hookName: "SessionStart:startup", command: '"/x/tracemind-run" context # tracemind-context', ...attachment } },
+        ...(attachment ? [{ ...base, type: "attachment", timestamp: t(0), attachment: { hookEvent: "SessionStart", hookName: "SessionStart:startup", command: '"/x/tracemind-run" context # tracemind-context', ...attachment } }] : []),
         { ...base, type: "user", timestamp: t(1), message: { role: "user", content: "hello" } },
       ];
       return parseClaudeSession(id, lines.map((l) => JSON.stringify(l)).join("\n"), { person: "Ada" });
@@ -135,13 +135,18 @@ describe("suggestions", () => {
     await store.saveTrace("local", given);
     await store.saveTrace("local", withHook("b2", 1, { type: "hook_success", stdout: "" }));
     await store.saveTrace("local", withHook("b3", 2, { type: "hook_non_blocking_error", stderr: "node: not found" }));
+    // What Claude Code really keeps when the brief has nothing to say: no record of the hook at all.
+    // The hook's own note is what tells that session (b4) from one where it did not run (b5).
+    await store.recordBrief("local", "b4", "empty");
+    await store.saveTrace("local", withHook("b4", 4));
+    await store.saveTrace("local", withHook("b5", 5));
     // A routine run starting since then never runs this machine's hooks: it is not a missed brief.
     const { parseRoutineRuns } = await import("../src/core/parse-routine.ts");
     const at = new Date(later + 3 * 600_000).toISOString();
     for (const run of parseRoutineRuns(`[${at}] env[info]: Allocating sandbox\n[${at}] tool_use Bash: {}\n[${at}] tool_result: ok\n[${at}] result: success is_error=false turns=1 duration=1s — ok`, { routine: "R", sessionId: "s", person: "Ada" })) await store.saveTrace("local", run);
     await post(app, "/api/suggestions/nothing/dismiss"); // any write clears the cached list
     const after = (await (await app.request("/api/suggestions")).json()).find((s: any) => s.id === routine.id);
-    expect(after.checks).toEqual({ sessions: 3, given: 1, empty: 1, failed: 1, unrecorded: 0 });
+    expect(after.checks).toEqual({ sessions: 5, given: 1, empty: 2, failed: 1, unrecorded: 1 });
   });
 
   it("keep an applied or dismissed fix listed after its issue stops showing up, so it can still be undone", async () => {
@@ -239,6 +244,50 @@ describe("suggestions", () => {
     const routine = (await (await app.request("/api/suggestions")).json()).find((s: any) => s.kind === "routine");
     expect(routine.causes).toContain("Waited with sleep, which is blocked");
     expect(routine.causes).not.toContain(unnamed.id);
+  });
+
+  it("count the brief as a fix only for the causes it may name: not a bare exit code", async () => {
+    const { store, app } = await setup();
+    // A command that exits with an error in three more sessions. The brief leaves that out: it is
+    // mostly grep or a test finding nothing.
+    const exits = (id: string, n: number) => {
+      const t = (s: number) => new Date(Date.now() - n * 60_000 + s * 1000).toISOString();
+      const base = { sessionId: id, cwd: project, isSidechain: false };
+      const lines = [
+        { ...base, type: "user", timestamp: t(0), message: { role: "user", content: "go" } },
+        { ...base, type: "assistant", timestamp: t(1), message: { id: `${id}a`, model: "m", content: [{ type: "tool_use", id: `${id}1`, name: "Bash", input: { command: "grep -r needle src" } }], usage: {} } },
+        { ...base, type: "user", timestamp: t(2), message: { content: [{ type: "tool_result", tool_use_id: `${id}1`, is_error: true, content: "Exit code 1" }] } },
+      ];
+      return parseClaudeSession(id, lines.map((l) => JSON.stringify(l)).join("\n"), { person: "Ada" });
+    };
+    for (let i = 0; i < 3; i++) await store.saveTrace("local", exits(`exit${i}`, i + 1));
+    expect(await sessionContext(store, "local", project)).not.toContain("Exited with an error code");
+
+    const groups = await (await app.request("/api/issue-groups?days=30")).json();
+    const exit = groups.find((g: any) => g.what === "Exited with an error code");
+    expect(exit.sessions).toBe(3);
+    const routine = (await (await app.request("/api/suggestions")).json()).find((s: any) => s.kind === "routine");
+    expect(routine.causes).toContain("Waited with sleep, which is blocked");
+    expect(routine.causes).not.toContain(exit.id);
+    // So the Issues list does not show the exit code as having a fix.
+    expect(exit.fix).toBeNull();
+  });
+
+  it("drop from a brief kept by an older version the causes it never named", async () => {
+    const { store, app } = await setup();
+    const routine = (await (await app.request("/api/suggestions?days=7")).json()).find((s: any) => s.kind === "routine");
+    await post(app, `/api/suggestions/${routine.id}/apply`);
+    // As an older Tracemind kept it: a bare exit code and an error without a name among its causes.
+    const [row] = await store.db.all<{ detail: string }>("SELECT detail FROM suggestions WHERE workspace = ? AND id = ?", ["local", routine.id]);
+    const detail = JSON.parse(row.detail);
+    detail.fix.causes = [...detail.fix.causes, "Exited with an error code", "tool_error|Zorblax: failed"];
+    await store.db.run("UPDATE suggestions SET detail = ? WHERE workspace = ? AND id = ?", [JSON.stringify(detail), "local", routine.id]);
+    // Its issues stop showing up, so it is listed from that copy.
+    await store.db.run("DELETE FROM findings WHERE workspace = ?", ["local"]);
+    await post(app, "/api/suggestions/nothing/dismiss"); // any write clears the cached list
+    const later = (await (await app.request("/api/suggestions?days=1")).json()).find((s: any) => s.id === routine.id);
+    expect(later.status).toBe("applied");
+    expect(later.causes).toEqual(routine.causes);
   });
 });
 

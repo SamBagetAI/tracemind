@@ -209,6 +209,39 @@ describe.each(dbs)("Store on %s", (_, open) => {
     expect(await s.neighbours("w", "nope", since)).toBeNull();
   });
 
+  it("keeps what the session-start brief did, as the hook wrote it down and as the transcript shows", async () => {
+    const s = await store();
+    const at = (id: string, day: number, seen?: "given" | "failed") => {
+      const t = later(trace(), id, `2026-09-0${day}T00:00:00.000Z`);
+      return seen ? { ...t, session: { ...t.session, brief: seen } } : t;
+    };
+    const brief = async (ws: string, id: string) => (await s.sessions(ws)).find((x) => x.id === id)!.brief;
+    // Nothing to say leaves no trace in a transcript: the hook's own note is all there is.
+    await s.recordBrief("w", "quiet", "empty");
+    await s.saveTrace("w", at("quiet", 1));
+    expect(await brief("w", "quiet")).toBe("empty");
+    // Given once stays given: a session starts again after a compaction, maybe with nothing to add.
+    await s.recordBrief("w", "told", "given");
+    await s.recordBrief("w", "told", "empty");
+    await s.saveTrace("w", at("told", 2));
+    expect(await brief("w", "told")).toBe("given");
+    // What the transcript shows still counts: a failure is not hidden by a quiet run, and given wins.
+    await s.recordBrief("w", "broke", "empty");
+    await s.saveTrace("w", at("broke", 3, "failed"));
+    expect(await brief("w", "broke")).toBe("failed");
+    await s.recordBrief("w", "both", "empty");
+    await s.saveTrace("w", at("both", 4, "given"));
+    expect(await brief("w", "both")).toBe("given");
+    // No note and nothing in the transcript: the hook did not run in that session.
+    await s.saveTrace("w", at("never", 5));
+    expect(await brief("w", "never")).toBeNull();
+    // A note belongs to its workspace, and survives the session being saved again.
+    await s.saveTrace("other", at("quiet", 1));
+    expect(await brief("other", "quiet")).toBeNull();
+    await s.saveTrace("w", at("quiet", 1));
+    expect(await brief("w", "quiet")).toBe("empty");
+  });
+
   it("tracks what still needs pushing", async () => {
     const s = await store();
     await s.saveTrace("w", trace());

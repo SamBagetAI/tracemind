@@ -16,7 +16,7 @@ import { createHash } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { claudeHome, hasHook } from "../cli/claude.ts";
-import { CAUSE } from "../core/describe.ts";
+import { CAUSE, inBrief, inBriefById } from "../core/describe.ts";
 import { daysAgo } from "../core/time.ts";
 import type { Row } from "../store/db.ts";
 import { causeKeys, issueGroups } from "../store/insights.ts";
@@ -267,9 +267,9 @@ export async function buildSuggestions(store: Store, ws: string, local: boolean,
     }
   }
 
-  // 5. A routine: tell every new session what keeps going wrong in its project. Named causes only,
-  // as in the brief itself (brief.ts), which never repeats an error's own words to a session.
-  const recurring = f.groups.filter((g) => g.plain && g.sessions >= 3 && g.kind !== "interrupted");
+  // 5. A routine: tell every new session what keeps going wrong in its project. It is a fix for the
+  // causes the brief may name (inBrief) and no others: never an error's own words or a bare exit code.
+  const recurring = f.groups.filter((g) => inBrief(g) && g.sessions >= 3);
   if (recurring.length >= 2) {
     out.push({
       ...ROUTINE,
@@ -326,7 +326,8 @@ export async function buildSuggestions(store: Store, ws: string, local: boolean,
     if (built.has(id) || (st.status !== "applied" && st.status !== "dismissed")) continue;
     const kept = keptCopy(id, String(st.detail ?? "{}"));
     if (kept) {
-      out.push(kept);
+      // A brief kept by an older version can list causes the brief never names.
+      out.push(kept.kind === "routine" ? { ...kept, causes: kept.causes.filter(inBriefById) } : kept);
       built.add(id);
     }
   }

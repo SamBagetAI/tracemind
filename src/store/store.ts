@@ -1,6 +1,6 @@
 /** Reading and writing traces, issues and tokens. All queries are scoped to one workspace. */
 import { redact } from "../core/redact.ts";
-import type { Finding, IssueKind, MemoryEvent, Step, Trace } from "../core/types.ts";
+import type { Brief, Finding, IssueKind, MemoryEvent, Step, Trace } from "../core/types.ts";
 import type { Db, Row } from "./db.ts";
 import { autoResolve, issue, issues, setIssueStatus, touchIssue } from "./issues.ts";
 import { migrate } from "./migrate.ts";
@@ -12,6 +12,16 @@ export { ROUTINE_AGENT, kindClause, n, type IssueRef, type IssueRow, type Sessio
 export { AUTO_RESOLVER, QUIET_SESSIONS } from "./issues.ts";
 
 type SessionFilter = { outcome?: string; project?: string; person?: string; q?: string; since?: string; kind?: SessionKind; limit?: number; offset?: number };
+
+/**
+ * The brief in a session, from what its transcript shows and what the hook noted itself
+ * (recordBrief): given wins, then a failure, then nothing to say. Null when there is neither.
+ */
+function briefOf(seen: Brief | null | undefined, noted: string | undefined): Brief | null {
+  if (seen === "given" || noted === "given") return "given";
+  if (seen === "failed") return "failed";
+  return seen === "empty" || noted === "empty" ? "empty" : null;
+}
 
 export class Store {
   constructor(readonly db: Db) {}
@@ -29,6 +39,7 @@ export class Store {
         "SELECT pushed_at FROM sessions WHERE workspace = ? AND id = ?",
         [ws, s.id],
       );
+      const [noted] = await db.all<{ brief: string }>("SELECT brief FROM briefs WHERE workspace = ? AND session_id = ?", [ws, s.id]);
       await deleteSession(db, ws, s.id);
       await insertMany(
         db,
@@ -36,7 +47,7 @@ export class Store {
         ["workspace", "id", "agent", "person", "project", "title", "git_branch", "model", "agent_version", "started_at",
           "ended_at", "outcome", "step_count", "tool_calls", "tool_errors", "input_tokens", "output_tokens", "active_ms", "cost_usd", "brief", "received_at", "pushed_at"],
         [[ws, s.id, s.agent, person, redact(s.project), redact(s.title), s.gitBranch, s.model, s.agentVersion, s.startedAt,
-          s.endedAt, s.outcome, s.stepCount, s.toolCalls, s.toolErrors, s.inputTokens, s.outputTokens, s.activeMs ?? 0, s.costUsd ?? 0, s.brief ?? null, now(), prior[0]?.pushed_at ?? null]],
+          s.endedAt, s.outcome, s.stepCount, s.toolCalls, s.toolErrors, s.inputTokens, s.outputTokens, s.activeMs ?? 0, s.costUsd ?? 0, briefOf(s.brief, noted?.brief), now(), prior[0]?.pushed_at ?? null]],
       );
       await insertMany(
         db,
@@ -59,6 +70,20 @@ export class Store {
       for (const f of trace.findings) await touchIssue(db, ws, f, s.startedAt, s.endedAt);
     });
     await autoResolve(this.db, ws, redact(s.project));
+  }
+
+  /**
+   * Notes what the session-start brief did in a session, when the hook runs. Claude Code records a
+   * hook in the transcript only when it prints something, so a brief with nothing to say would
+   * leave no trace, and look like a hook that never ran. Given once stays given: a session starts
+   * again after a compaction. saveTrace puts the note on the session.
+   */
+  async recordBrief(ws: string, sessionId: string, brief: "given" | "empty") {
+    await this.db.run(
+      `INSERT INTO briefs (workspace, session_id, brief, at) VALUES (?, ?, ?, ?)
+       ON CONFLICT (workspace, session_id) DO UPDATE SET brief = CASE WHEN briefs.brief = 'given' THEN 'given' ELSE excluded.brief END, at = excluded.at`,
+      [ws, sessionId, brief, now()],
+    );
   }
 
   async sessions(ws: string, f: SessionFilter = {}) {

@@ -103,6 +103,14 @@ CREATE TABLE IF NOT EXISTS tokens (
   last_used_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS briefs (
+  workspace TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  brief TEXT NOT NULL,
+  at TEXT NOT NULL,
+  PRIMARY KEY (workspace, session_id)
+);
+
 CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL

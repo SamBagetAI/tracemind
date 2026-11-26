@@ -441,7 +441,10 @@ is counted over those sessions.
   Interruptions are no longer counted in the list's bar.
 - A session's issues are counted by cause, in the header and in the side panel.
 - Every cause that a suggested change covers shows "fix ready". This includes the session-start brief, and
-  the cause page then explains that the brief covers several causes.
+  the cause page then explains that the brief covers several causes. The brief covers the causes it may
+  name: not a bare exit code, and never an error without a name.
+- The brief's check tells "nothing to report" from "did not run". Claude Code records a hook only when
+  it prints something, so the hook notes what it did itself.
 - The test `adds the Tools rows up to the Overview's totals` checks these totals.
 
 **Detail pages that show what happened.**

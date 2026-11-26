@@ -205,8 +205,12 @@ async function main(argv: string[]) {
         const store = await openStore();
         const { sessionContext } = await import("../server/brief.ts");
         const text = await sessionContext(store, WS, cwd);
-        await store.db.close();
         if (text) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: text } }));
+        // Claude Code keeps a record of this hook only when it prints something: note what it did,
+        // so "nothing to say" can be told from "did not run" (the check on the Fixes page).
+        const id: unknown = input.session_id;
+        if (typeof id === "string" && /^[A-Za-z0-9_.:-]{1,100}$/.test(id)) await store.recordBrief(WS, id, text ? "given" : "empty");
+        await store.db.close();
       } catch (e) {
         log(`context error: ${(e as Error).stack ?? e}`);
       }
