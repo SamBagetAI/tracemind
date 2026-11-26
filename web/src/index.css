@@ -28,7 +28,8 @@
   --secondary-foreground: #1d1b18;
   --muted: #f3f3f2;
   --muted-foreground: #6b6b68;
-  --faint: #8d8d89;
+  /* The lightest grey small text can be and still read (4.5:1) on every background it sits on: test/colors.test.ts. */
+  --faint: #6e6e6b;
   --accent: #f1f1ef;
   --accent-foreground: #1d1b18;
   --destructive: #b8322b;
@@ -56,7 +57,7 @@
   --secondary-foreground: #ededea;
   --muted: #19191c;
   --muted-foreground: #a3a39d;
-  --faint: #6f6f6a;
+  --faint: #8a8a85;
   --accent: #212126;
   --accent-foreground: #ededea;
   --destructive: #ff6166;

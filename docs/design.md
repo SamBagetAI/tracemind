@@ -543,3 +543,7 @@ On a subscription nobody pays per token, so the page says "at API prices". Unkno
 **The look is white paper and ink**: background `#ffffff`, ink `#1d1b18`, borders `#e6e6e3`, a yellow
 highlighter `#ffe58a` under what went wrong, red kept for failures. Schibsted Grotesk for words, IBM Plex
 Mono for machine text. Light is the default; the dark tokens remain for later.
+
+**Grey text reads.** It is `#6b6b68`, and `#6e6e6b` for the smallest labels (step numbers, times, units):
+the lightest that keeps 4.5:1 on every background it sits on, hovered and open rows included. A test
+checks both greys in both sets of tokens (`test/colors.test.ts`).

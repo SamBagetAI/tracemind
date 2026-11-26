@@ -5,8 +5,12 @@
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { SECURITY_HEADERS } from "../src/server/app.ts";
 
-const vercel = JSON.parse(readFileSync("vercel.json", "utf8")) as { rewrites: { source: string; destination: string }[] };
+const vercel = JSON.parse(readFileSync("vercel.json", "utf8")) as {
+  rewrites: { source: string; destination: string }[];
+  headers?: { source: string; headers: { key: string; value: string }[] }[];
+};
 const entry = readFileSync("api/index.ts", "utf8");
 
 /** Where Vercel sends a path: the first rewrite whose source matches it. */
@@ -20,6 +24,12 @@ describe("Vercel deployment", () => {
     expect(routeOf("/healthz")).toBe("/api");
     expect(routeOf("/mcp")).toBe("/api");
     expect(routeOf("/sessions/abc")).toBe("/index.html");
+  });
+
+  it("sends pages the same security headers the app sends with everything it answers", () => {
+    // On Vercel the pages are static files: they never reach the app, so vercel.json sends them.
+    const everywhere = vercel.headers?.find((h) => h.source === "/(.*)");
+    expect(Object.fromEntries((everywhere?.headers ?? []).map((h) => [h.key.toLowerCase(), h.value]))).toEqual(SECURITY_HEADERS);
   });
 
   it("answers every method MCP over HTTP uses", () => {
