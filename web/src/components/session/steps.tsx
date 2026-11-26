@@ -4,7 +4,6 @@ import { memo, useMemo } from "react";
 import { Link } from "react-router";
 import { copyText } from "@/components/change";
 import { Button } from "@/components/ui/button";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Finding, IssueRef, MemoryEvent, Step } from "@/lib/api";
 import { describeIssue, duration, elapsed, num, plainText, plural, sessionsLevel, LEVEL_CLASS, shortPath, memoryLabel } from "@/lib/format";
@@ -128,67 +127,74 @@ export const StepRow = memo(function StepRow({ row, t0, open, onToggle, memory, 
   );
   const expandable = !!(first.input || first.output) && first.kind !== "compact";
   const stepMemory = steps.flatMap((s) => memory.get(s.seq) ?? []);
+  const toggle = expandable ? () => onToggle(first.seq) : undefined;
 
+  // Plain elements, not a collapsible component: one that measures its content when it mounts costs
+  // half a second across the rows of a long session. Closed, a row has no detail in the page at all.
   return (
-    <Collapsible open={open} onOpenChange={() => onToggle(first.seq)} asChild>
-      <li id={`s-${first.seq}`} className={cn("relative scroll-mt-20", failed && "before:absolute before:inset-y-0 before:left-0 before:w-[2px] before:bg-fail", current && "ring-1 ring-fail/50 ring-inset")}>
-        <CollapsibleTrigger asChild disabled={!expandable}>
-          <div
-            role="button"
-            tabIndex={expandable ? 0 : -1}
-            aria-expanded={expandable ? open : undefined}
-            className={cn(GRID, "group/row py-1.5 transition-colors", expandable && "cursor-pointer hover:bg-accent focus-visible:bg-accent focus-visible:outline-none", open && "bg-accent/60")}
-          >
-            <span className="text-right text-[12px] whitespace-nowrap text-faint num">{seq}</span>
-            <span className="hidden text-right text-[12px] text-faint num sm:block">{elapsed(Date.parse(first.at) - t0)}</span>
-            <span className="flex h-5 items-center justify-center self-start">{icon}</span>
-            {text ? (
-              <>
-                <span className={cn("hidden truncate sm:block", first.kind === "prompt" ? "font-medium text-foreground" : "text-muted-foreground")}>{first.name}</span>
-                <span className={cn("min-w-0 truncate sm:col-span-2", first.kind === "prompt" ? "text-foreground" : "text-foreground/75")}>
-                  <span className="mr-1.5 font-medium sm:hidden">{first.name}</span>
-                  {first.kind === "prompt" ? first.input : first.output}
-                </span>
-              </>
-            ) : (
-              <>
-                <span className="hidden truncate font-mono text-[12px] text-foreground sm:block">{tool}</span>
-                <span className="hidden min-w-0 truncate font-mono text-[12px] text-foreground/80 sm:block">{inputs}</span>
-                <span className="hidden min-w-0 truncate text-[12px] text-muted-foreground sm:block">{failed ? "" : resultLine}</span>
-                <span className="min-w-0 sm:hidden">
-                  <span className="block truncate font-mono text-[12px] text-foreground">{tool}</span>
-                  <span className="line-clamp-2 font-mono text-[12px] break-all text-foreground/70">{inputs}</span>
-                  {!failed && <span className="block truncate text-[12px] text-muted-foreground">{resultLine}</span>}
-                </span>
-              </>
-            )}
-            <span className="flex items-baseline justify-end gap-1 text-right text-[12px] text-faint num">
-              {totalMs ? duration(totalMs) : ""}
-              {expandable && <ChevronRight className={cn("size-3 self-center opacity-0 transition-[opacity,transform] group-hover/row:opacity-100", (open || failed) && "opacity-100", open && "rotate-90")} />}
+    <li id={`s-${first.seq}`} className={cn("relative scroll-mt-20", failed && "before:absolute before:inset-y-0 before:left-0 before:w-[2px] before:bg-fail", current && "ring-1 ring-fail/50 ring-inset")}>
+      <div
+        role="button"
+        tabIndex={expandable ? 0 : -1}
+        aria-expanded={expandable ? open : undefined}
+        aria-disabled={expandable ? undefined : true}
+        onClick={toggle}
+        // Enter or Space on the row itself, not on a link or a chip inside it.
+        onKeyDown={toggle && ((e) => {
+          if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
+          e.preventDefault();
+          toggle();
+        })}
+        className={cn(GRID, "group/row py-1.5 transition-colors", expandable && "cursor-pointer hover:bg-accent focus-visible:bg-accent focus-visible:outline-none", open && "bg-accent/60")}
+      >
+        <span className="text-right text-[12px] whitespace-nowrap text-faint num">{seq}</span>
+        <span className="hidden text-right text-[12px] text-faint num sm:block">{elapsed(Date.parse(first.at) - t0)}</span>
+        <span className="flex h-5 items-center justify-center self-start">{icon}</span>
+        {text ? (
+          <>
+            <span className={cn("hidden truncate sm:block", first.kind === "prompt" ? "font-medium text-foreground" : "text-muted-foreground")}>{first.name}</span>
+            <span className={cn("min-w-0 truncate sm:col-span-2", first.kind === "prompt" ? "text-foreground" : "text-foreground/75")}>
+              <span className="mr-1.5 font-medium sm:hidden">{first.name}</span>
+              {first.kind === "prompt" ? first.input : first.output}
             </span>
-            {failed && (
-              <span className="col-start-3 col-end-5 pt-0.5 pb-1 sm:col-start-4 sm:col-end-8">
-                <span className="line-clamp-3 font-mono text-[12px] leading-snug break-words text-fail">{errorText}</span>
-                <IssueLine finding={row.finding} issue={row.issue} window={issueWindow} />
-                {!open && <span className="mt-0.5 block text-[11px] text-faint group-hover/row:text-muted-foreground">Open for the full {first.name === "Bash" ? "command" : "input"} and error</span>}
-              </span>
-            )}
-            {stepMemory.length > 0 && (
-              <span className="col-start-3 col-end-5 flex flex-wrap gap-1 pb-1 sm:col-start-4 sm:col-end-8">
-                {stepMemory.map((m, i) => <MemoryChip key={i} m={m} />)}
-              </span>
-            )}
-          </div>
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          <div className="pr-2 pb-3 pl-[72px] sm:pl-[150px]">
-            {steps.length > 1 && <p className="mb-2 text-[12px] text-muted-foreground">Steps {seq} failed the same way. The first one:</p>}
-            {first.kind !== "reply" && <Raw label={first.kind === "prompt" ? "Prompt" : "Input"} text={first.input} />}
-            <Raw label={failed ? "Error" : first.kind === "reply" ? "Reply" : "Output"} text={first.output} />
-          </div>
-        </CollapsibleContent>
-      </li>
-    </Collapsible>
+          </>
+        ) : (
+          <>
+            <span className="hidden truncate font-mono text-[12px] text-foreground sm:block">{tool}</span>
+            <span className="hidden min-w-0 truncate font-mono text-[12px] text-foreground/80 sm:block">{inputs}</span>
+            <span className="hidden min-w-0 truncate text-[12px] text-muted-foreground sm:block">{failed ? "" : resultLine}</span>
+            <span className="min-w-0 sm:hidden">
+              <span className="block truncate font-mono text-[12px] text-foreground">{tool}</span>
+              <span className="line-clamp-2 font-mono text-[12px] break-all text-foreground/70">{inputs}</span>
+              {!failed && <span className="block truncate text-[12px] text-muted-foreground">{resultLine}</span>}
+            </span>
+          </>
+        )}
+        <span className="flex items-baseline justify-end gap-1 text-right text-[12px] text-faint num">
+          {totalMs ? duration(totalMs) : ""}
+          {expandable && <ChevronRight className={cn("size-3 self-center opacity-0 transition-[opacity,transform] group-hover/row:opacity-100", (open || failed) && "opacity-100", open && "rotate-90")} />}
+        </span>
+        {failed && (
+          <span className="col-start-3 col-end-5 pt-0.5 pb-1 sm:col-start-4 sm:col-end-8">
+            <span className="line-clamp-3 font-mono text-[12px] leading-snug break-words text-fail">{errorText}</span>
+            <IssueLine finding={row.finding} issue={row.issue} window={issueWindow} />
+            {!open && <span className="mt-0.5 block text-[11px] text-faint group-hover/row:text-muted-foreground">Open for the full {first.name === "Bash" ? "command" : "input"} and error</span>}
+          </span>
+        )}
+        {stepMemory.length > 0 && (
+          <span className="col-start-3 col-end-5 flex flex-wrap gap-1 pb-1 sm:col-start-4 sm:col-end-8">
+            {stepMemory.map((m, i) => <MemoryChip key={i} m={m} />)}
+          </span>
+        )}
+      </div>
+      {open && expandable && (
+        <div className="pr-2 pb-3 pl-[72px] sm:pl-[150px]">
+          {steps.length > 1 && <p className="mb-2 text-[12px] text-muted-foreground">Steps {seq} failed the same way. The first one:</p>}
+          {first.kind !== "reply" && <Raw label={first.kind === "prompt" ? "Prompt" : "Input"} text={first.input} />}
+          <Raw label={failed ? "Error" : first.kind === "reply" ? "Reply" : "Output"} text={first.output} />
+        </div>
+      )}
+    </li>
   );
 });
 

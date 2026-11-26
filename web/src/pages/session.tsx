@@ -6,6 +6,7 @@
  */
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { SidePanel } from "@/components/session/side-panel";
 import { FoldRow, StartContext, StepRow } from "@/components/session/steps";
@@ -67,6 +68,14 @@ type Nav = NonNullable<Trace["nav"]> & { scoped: boolean; days: number };
 /** Not among the newest sessions the server ranks: no position and no arrows. */
 const NO_NAV = { newer: null, older: null, index: -1, total: 0 };
 
+/**
+ * A long session's rows go into the page a slice at a time: the first screens at once, then more
+ * each tick, so thousands of rows never hold the page still while they are built. They all end up
+ * in the page (unlike a window of rows), so the browser's own search and every link to a step work.
+ */
+const FIRST_ROWS = 150;
+const MORE_ROWS = 400;
+
 export function SessionPage() {
   const { id = "" } = useParams();
   const { days } = useWindow();
@@ -85,6 +94,14 @@ export function SessionPage() {
   }, [id]);
 
   const rows = useMemo(() => (t.data ? buildRows(t.data, focus) : []), [t.data, focus]);
+  // How many of them are in the page so far. Another list (another session, Focus on or off) starts over.
+  const [mounted, setMounted] = useState({ rows, n: FIRST_ROWS });
+  const shown = mounted.rows === rows ? mounted.n : FIRST_ROWS;
+  useEffect(() => {
+    if (shown >= rows.length) return;
+    const timer = setTimeout(() => setMounted({ rows, n: shown + MORE_ROWS }), 0);
+    return () => clearTimeout(timer);
+  }, [rows, shown]);
   const t0 = t.data?.steps[0] ? Date.parse(t.data.steps[0].at) : 0;
   const toggle = useCallback(
     (key: number) =>
@@ -101,7 +118,11 @@ export function SessionPage() {
   const jump = useCallback(
     (seq: number) => {
       const fold = rows.find((r) => r.type === "fold" && r.steps.some((s) => s.seq === seq));
-      if (fold?.type === "fold") setOpen((o) => new Set(o).add(-fold.steps[0].seq));
+      // The step has to be in the page before it can be scrolled to: every row, and its fold open, now.
+      flushSync(() => {
+        setMounted((m) => (m.rows === rows && m.n >= rows.length ? m : { rows, n: rows.length }));
+        if (fold?.type === "fold") setOpen((o) => new Set(o).add(-fold.steps[0].seq));
+      });
       const owner = rows.find((r) => r.type === "repeat" && r.steps.some((s) => s.seq === seq));
       const anchor = owner?.type === "repeat" ? owner.steps[0].seq : seq;
       requestAnimationFrame(() => document.getElementById(`s-${anchor}`)?.scrollIntoView({ behavior: "smooth", block: "center" }));
@@ -200,7 +221,7 @@ export function SessionPage() {
           </div>
           <ul className="border-y">
             <StartContext memory={memory} />
-            {rows.map(renderRow)}
+            {rows.slice(0, shown).map(renderRow)}
           </ul>
           </div>
           <SidePanel t={t.data} onJump={jump} />
