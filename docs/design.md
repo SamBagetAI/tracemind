@@ -466,6 +466,10 @@ is counted over those sessions.
 - The Overview shows the one next change and links to the rest. Every suggestion says why it is suggested.
 - The brief says "This keeps going wrong" when it lists one problem.
 - The agent's replies fold into quiet stretches, so a long session has a few folds instead of twenty.
+- A long session's rows go into the page a slice at a time, the first screens at once, and a row is
+  plain elements with no detail until it is opened. "Every step" on a 7,000-step session shows in a
+  blink instead of holding the page for a second. Every row still ends up in the page, so the
+  browser's own search finds them all: that is why the list is not cut down to the rows on screen.
 - The Sessions count is said once.
 
 This replaces the earlier rule "Magic UI for small animated details". The animations it gave were
