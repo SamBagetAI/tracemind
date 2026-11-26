@@ -76,6 +76,7 @@ checks.
 The Fixes page turns what keeps going wrong into changes to how Claude is used:
 - **A rule:** added to your global `~/.claude/CLAUDE.md` or to a project's CLAUDE.md or AGENTS.md.
 - **A routine:** a SessionStart hook that tells each new session what keeps going wrong in its project.
+  It names only the causes Tracemind recognises, never an error's own words.
 - **A prompt to hand to Claude:** for things that need a person, such as signing a connector in or trimming a file that is too big.
 
 Every file change is previewed first, backed up, and can be undone. Once the session-start brief is

@@ -52,6 +52,22 @@ describe("the local app", () => {
     const dismiss = await app.request("http://evil.example:4545/api/cause/x/status", json({ status: "resolved" }, { origin: "http://evil.example:4545" }));
     expect(dismiss.status).toBe(403);
   });
+
+  it("takes a session from this page or the command line, never from a page on another site", async () => {
+    const { app, store } = await localApp();
+    const planted = { ...trace(), session: { ...trace().session, id: "planted" } };
+    const url = "http://localhost:4545/api/ingest";
+    // What any page can send to localhost without asking the browser first: a plain-text POST.
+    const evil = await app.request(url, { method: "POST", headers: { origin: "https://evil.example", "content-type": "text/plain;charset=UTF-8" }, body: JSON.stringify(planted) });
+    expect(evil.status).toBe(403);
+    // Another app on this machine is another site too.
+    expect((await app.request(url, json(planted, { origin: "http://localhost:3000" }))).status).toBe(403);
+    expect((await store.sessions("local")).map((s) => s.id)).toEqual(["sess-1"]);
+    // This page, and a client that is not a browser (no Origin: curl, the MCP tools' own calls).
+    expect((await app.request(url, json(planted, { origin: "http://localhost:4545" }))).status).toBe(200);
+    expect((await app.request(url, json({ ...planted, session: { ...planted.session, id: "by-hand" } }))).status).toBe(200);
+    expect((await store.sessions("local")).map((s) => s.id).sort()).toEqual(["by-hand", "planted", "sess-1"]);
+  });
 });
 
 describe("numbers the pages show", () => {
@@ -241,6 +257,21 @@ describe("server mode", () => {
     expect(await me.json()).toMatchObject({ workspace: "acme", person: "Ada" });
     // The page itself loads for anyone; the API behind it is what needs the token.
     expect((await app.request("http://h/")).status).toBe(200);
+  });
+
+  it("does not let another site change anything with the sign-in cookie", async () => {
+    const { app, store } = await serverApp();
+    const token = await store.createToken("acme", "Ada", "admin");
+    const cookie = { cookie: `tm_token=${token}` };
+    // Signed in, on the site itself.
+    expect((await app.request("http://h/api/tokens", json({ person: "Grace" }, { ...cookie, origin: "http://h" }))).status).toBe(200);
+    // Another site, with the cookie the browser holds.
+    expect((await app.request("http://h/api/tokens", json({ person: "Eve", role: "admin" }, { ...cookie, origin: "https://evil.example" }))).status).toBe(403);
+    expect((await app.request("http://h/api/ingest", json(trace(), { ...cookie, origin: "https://evil.example" }))).status).toBe(403);
+    expect(await store.sessions("acme")).toEqual([]);
+    expect(await store.tokenCount()).toBe(2);
+    // The command line sends its token, not a cookie: there is no site to check.
+    expect((await app.request("http://h/api/ingest", json(trace(), { authorization: `Bearer ${token}` }))).status).toBe(200);
   });
 });
 

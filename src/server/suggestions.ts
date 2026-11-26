@@ -267,8 +267,9 @@ export async function buildSuggestions(store: Store, ws: string, local: boolean,
     }
   }
 
-  // 5. A routine: tell every new session what keeps going wrong in its project.
-  const recurring = f.groups.filter((g) => g.sessions >= 3 && g.kind !== "interrupted");
+  // 5. A routine: tell every new session what keeps going wrong in its project. Named causes only,
+  // as in the brief itself (brief.ts), which never repeats an error's own words to a session.
+  const recurring = f.groups.filter((g) => g.plain && g.sessions >= 3 && g.kind !== "interrupted");
   if (recurring.length >= 2) {
     out.push({
       ...ROUTINE,

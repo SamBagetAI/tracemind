@@ -172,6 +172,10 @@ export function createApp(opts: AppOptions) {
     c.set("viewer", v);
     await next();
   });
+  // Anything that changes something must come from this site or carry a bearer token. The local app
+  // has no sign-in and a server's cookie is sent by the browser itself: without this, a page on
+  // another site could post to either (a made-up session, a new token).
+  api.use("*", async (c, next) => (c.req.method === "GET" || sameOrigin(c) ? next() : c.json({ error: "forbidden" }, 403)));
 
   /**
    * Suggestions per workspace and window, kept for 15 seconds: one page load reads them from up to
@@ -298,7 +302,6 @@ export function createApp(opts: AppOptions) {
   });
 
   api.post("/cause/:key/status", async (c) => {
-    if (!sameOrigin(c)) return c.json({ error: "forbidden" }, 403);
     const v = c.get("viewer");
     // Every variant of the cause the key belongs to.
     const key = c.req.param("key");
@@ -350,7 +353,6 @@ export function createApp(opts: AppOptions) {
     const s = await findSuggestion(c);
     if (!s) return c.json({ error: "not found" }, 404);
     if (verb === "dismiss" || verb === "restore") {
-      if (!sameOrigin(c)) return c.json({ error: "forbidden" }, 403);
       await setState(store, v.workspace, s.id, verb === "dismiss" ? "dismissed" : "open", verb === "dismiss" ? { fix: copyOf(s) } : {});
       return c.json({ ok: true });
     }
