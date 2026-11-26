@@ -113,6 +113,7 @@ describe("routine run ids", () => {
     const [run] = parseRoutineRuns("[2026-11-24T16:00:00.000Z] env[info]: x\n[2026-11-24T16:00:01.000Z] tool_use Bash: {}\n[2026-11-24T16:00:02.000Z] tool_result: ok\n[2026-11-24T16:05:00.000Z] result: success — ok", { routine: "R", sessionId: "s1", person: "Ada" });
     const old = { ...run, session: { ...run.session, id: "routine-s1-20261124160000000" } };
     await store.saveTrace("local", old);
+    await store.db.run("DELETE FROM meta"); // as an older Tracemind left it: no version kept
     await store.migrate();
     const ids = (await store.sessions("local", {})).map((s) => s.id);
     expect(ids).toEqual(["routine-s1-20261124160500000"]);
@@ -131,6 +132,7 @@ describe("routine run ids", () => {
     // Saved the old way: each keyed by its start. The first run's end is the second run's start.
     await store.saveTrace("local", { ...a, session: { ...a.session, id: "routine-s1-20261124160000000" } });
     await store.saveTrace("local", { ...b, session: { ...b.session, id: "routine-s1-20261124160500000" } });
+    await store.db.run("DELETE FROM meta");
     await store.migrate();
     expect((await store.sessions("local", {})).map((s) => s.id).sort()).toEqual(["routine-s1-20261124160500000", "routine-s1-20261124160600000"]);
   });

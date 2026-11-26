@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { parseClaudeSession } from "../src/core/parse-claude.ts";
 import type { Trace } from "../src/core/types.ts";
 import { type Db, fromPgQueryable, openSqlite, toPg } from "../src/store/db.ts";
+import { redateIssues } from "../src/store/issues.ts";
 import { AUTO_RESOLVER, QUIET_SESSIONS, Store } from "../src/store/store.ts";
 import { mainTranscript, subagentTranscript } from "./fixtures/session.ts";
 
@@ -175,8 +176,24 @@ describe.each(dbs)("Store on %s", (_, open) => {
     await s.saveTrace("other", trace());
     expect((await s.issues("w")).map((i) => i.num).sort()).toEqual([1, 2, 3, 4]);
     expect((await s.issues("other")).map((i) => i.num).sort()).toEqual([1, 2, 3, 4]);
-    // An older database had no numbers.
+    // An older database had no numbers, and kept no version.
     await s.db.run("UPDATE issues SET num = NULL WHERE workspace = ?", ["w"]);
+    await s.db.run("DELETE FROM meta");
+    await s.migrate();
+    expect((await s.issues("w")).map((i) => i.num).sort()).toEqual([1, 2, 3, 4]);
+  });
+
+  it("brings an older database up to date once, and leaves a current one alone", async () => {
+    const s = await store();
+    await s.saveTrace("w", trace());
+    const [{ value }] = await s.db.all<{ value: string }>("SELECT value FROM meta WHERE key = 'schema_version'");
+    expect(Number(value)).toBeGreaterThan(0);
+    // Something only an upgrade step touches: a start does not go over a current database again.
+    await s.db.run("UPDATE issues SET num = NULL WHERE workspace = ?", ["w"]);
+    await s.migrate();
+    expect((await s.issues("w")).map((i) => i.num)).toEqual([0, 0, 0, 0]);
+    // Without its version (as an older Tracemind left it), every step runs.
+    await s.db.run("DELETE FROM meta");
     await s.migrate();
     expect((await s.issues("w")).map((i) => i.num).sort()).toEqual([1, 2, 3, 4]);
   });
@@ -220,9 +237,24 @@ describe.each(dbs)("Issue dates on %s", (_, open) => {
     const [i] = await s.issues("w");
     expect(i.firstSeen).toBe("2026-07-01T00:00:00.000Z");
     expect(i.lastSeen).toBe("2026-09-01T00:00:00.000Z");
-    // And a database saved by an older version is repaired when it opens.
+    // And a database saved by an older version (no version kept) is repaired when it opens.
     await s.db.run("UPDATE issues SET first_seen = ?", ["2026-10-01T00:00:00.000Z"]);
+    await s.db.run("DELETE FROM meta");
     await s.migrate();
     expect((await s.issues("w"))[0].firstSeen).toBe("2026-07-01T00:00:00.000Z");
+  });
+
+  it("moves an issue's dates back when a session stops having it, as an import asks", async () => {
+    const s = new Store(await open());
+    await s.migrate();
+    await s.saveTrace("w", later(trace(), "early", "2026-07-01T00:00:00.000Z"));
+    await s.saveTrace("w", later(trace(), "late", "2026-09-01T00:00:00.000Z"));
+    // The late session saved again without its failures: an import that names them differently.
+    await s.saveTrace("w", { ...later(trace(), "late", "2026-09-01T00:00:00.000Z"), findings: [] });
+    // Saving only ever widens the dates, and a start no longer recounts them.
+    await s.migrate();
+    expect((await s.issues("w")).map((i) => i.lastSeen)).toEqual(Array(4).fill("2026-09-01T00:00:00.000Z"));
+    await redateIssues(s.db, "w");
+    expect((await s.issues("w")).map((i) => [i.firstSeen, i.lastSeen])).toEqual(Array(4).fill(["2026-07-01T00:00:00.000Z", "2026-07-01T00:00:00.000Z"]));
   });
 });

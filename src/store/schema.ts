@@ -102,4 +102,9 @@ CREATE TABLE IF NOT EXISTS tokens (
   created_at TEXT NOT NULL,
   last_used_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 `;

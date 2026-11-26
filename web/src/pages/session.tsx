@@ -151,17 +151,15 @@ export function SessionPage() {
     return by;
   }, [memory]);
   const issueWindow = t.data?.issueWindow ?? null;
+  // Rows are memoized (steps.tsx), and everything they are handed here keeps its identity between
+  // renders: opening a row renders that row, not the thousands of a long session.
   const renderRow = (r: Row): ReactNode => {
     if (r.type === "fold") {
       const key = -r.steps[0].seq;
-      return (
-        <FoldRow key={`f${key}`} steps={r.steps} open={open.has(key)} onToggle={() => toggle(key)}>
-          {r.steps.map((s) => <StepRow key={s.seq} row={{ type: "step", step: s }} t0={t0} open={open.has(s.seq)} onToggle={() => toggle(s.seq)} memory={memoryBySeq} issueWindow={issueWindow} />)}
-        </FoldRow>
-      );
+      return <FoldRow key={`f${key}`} steps={r.steps} opened={open.has(key) ? open : null} t0={t0} onToggle={toggle} memory={memoryBySeq} issueWindow={issueWindow} />;
     }
     const seq = r.type === "repeat" ? r.steps[0].seq : r.step.seq;
-    return <StepRow key={seq} row={r} t0={t0} open={open.has(seq)} onToggle={() => toggle(seq)} memory={memoryBySeq} issueWindow={issueWindow} current={current === seq} />;
+    return <StepRow key={seq} row={r} t0={t0} open={open.has(seq)} onToggle={toggle} memory={memoryBySeq} issueWindow={issueWindow} current={current === seq} />;
   };
 
   return (
