@@ -259,6 +259,40 @@ describe.each(dbs)("Store on %s", (_, open) => {
     const rows = await s.db.all<{ hash: string }>("SELECT hash FROM tokens");
     expect(rows[0].hash).not.toContain(token);
   });
+
+  it("lists a workspace's tokens without their secrets, and revokes one at once", async () => {
+    const s = await store();
+    const ada = await s.createToken("w", "Ada", "admin");
+    const grace = await s.createToken("w", "Grace", "member");
+    await s.createToken("other", "Eve", "admin");
+    const who = async (ws: string) => (await s.tokens(ws)).map((t) => t.person).sort();
+    const list = await s.tokens("w");
+    expect(await who("w")).toEqual(["Ada", "Grace"]);
+    for (const t of list) expect(t.id).toMatch(/^[0-9a-f]{8}$/);
+    expect(JSON.stringify(list)).not.toContain(ada.slice(3));
+    // When it was last used, so a token nobody uses can be told from one in use.
+    expect(list.find((t) => t.person === "Ada")!.lastUsedAt).toBeNull();
+    await s.tokenOwner(ada);
+    expect((await s.tokens("w")).find((t) => t.person === "Ada")!.lastUsedAt).not.toBeNull();
+
+    // Revoked: it stops working at once.
+    const g = list.find((t) => t.person === "Grace")!;
+    expect(await s.revokeToken("w", g.id)).toEqual({ outcome: "revoked", id: g.id });
+    expect(await s.tokenOwner(grace)).toBeNull();
+    expect(await who("w")).toEqual(["Ada"]);
+    // Not another workspace's token, and not an id that is not one.
+    const [eve] = await s.tokens("other");
+    expect((await s.revokeToken("w", eve.id)).outcome).toBe("not found");
+    expect((await s.revokeToken("w", "nope")).outcome).toBe("not found");
+    expect(await who("other")).toEqual(["Eve"]);
+    // Never a workspace's last admin token: no one could create or revoke tokens after it.
+    const a = list.find((t) => t.person === "Ada")!;
+    expect((await s.revokeToken("w", a.id)).outcome).toBe("last admin");
+    expect(await s.tokenOwner(ada)).not.toBeNull();
+    await s.createToken("w", "Lin", "admin");
+    expect((await s.revokeToken("w", a.id)).outcome).toBe("revoked");
+    expect(await who("w")).toEqual(["Lin"]);
+  });
 });
 
 describe.each(dbs)("Issue dates on %s", (_, open) => {

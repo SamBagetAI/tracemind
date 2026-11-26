@@ -32,6 +32,8 @@ Shared server
   tracemind cloud setup --url URL --secret S --workspace NAME   Create the first admin token on a new server
   tracemind cloud link --url URL --token TOKEN                  Send this machine's sessions to a server
   tracemind cloud token --person NAME [--admin]                 Create a token for a teammate (admins)
+  tracemind cloud tokens                                        See who holds a token and when it was last used (admins)
+  tracemind cloud revoke ID                                     Take a token back: it stops working at once (admins)
   tracemind cloud unlink
   tracemind push [--all]                    Send sessions the server does not have yet
   tracemind serve [--port 8080]             Run the shared server (needs DATABASE_URL)
@@ -348,8 +350,9 @@ Server:   ${cfg.server ? `${cfg.server.url} as ${cfg.server.person} in ${cfg.ser
     }
 
     case "cloud": {
-      const { values } = parseArgs({
+      const { values, positionals } = parseArgs({
         args: rest,
+        allowPositionals: true,
         options: {
           url: { type: "string" },
           token: { type: "string" },
@@ -399,13 +402,40 @@ Send the ones you already have with: tracemind push`);
 They run: tracemind cloud link --url ${cfg.server.url} --token <token>`);
         return;
       }
+      if (sub === "tokens") {
+        if (!cfg.server) throw new Error("Link a server first: tracemind cloud link --url URL --token TOKEN");
+        const list: { id: string; person: string; role: string; createdAt: string; lastUsedAt: string | null; current: boolean }[] = await api(cfg.server.url, "/api/tokens", { token: cfg.server.token });
+        // This machine's clock, to the minute.
+        const at = (iso: string | null) => (iso ? new Date(iso).toLocaleString("sv-SE").slice(0, 16) : "never");
+        const wide = Math.max("PERSON".length, ...list.map((t) => t.person.length));
+        console.log(`Tokens in ${cfg.server.workspace}:\n`);
+        console.log(`  ${"ID".padEnd(8)}  ${"PERSON".padEnd(wide)}  ${"ROLE".padEnd(6)}  ${"CREATED".padEnd(16)}  LAST USED`);
+        for (const t of list) console.log(`  ${t.id}  ${t.person.padEnd(wide)}  ${t.role.padEnd(6)}  ${at(t.createdAt)}  ${at(t.lastUsedAt)}${t.current ? "  (this machine)" : ""}`);
+        console.log("\nTake one back with: tracemind cloud revoke ID");
+        return;
+      }
+      if (sub === "revoke") {
+        if (!cfg.server) throw new Error("Link a server first: tracemind cloud link --url URL --token TOKEN");
+        const [id] = positionals;
+        if (!id) throw new Error("Usage: tracemind cloud revoke ID   (tracemind cloud tokens lists them)");
+        const r = await api(cfg.server.url, `/api/tokens/${encodeURIComponent(id)}`, { method: "DELETE", token: cfg.server.token });
+        if (r.current) {
+          // The token this machine sends with is gone: stop sending.
+          delete cfg.server;
+          saveConfig(cfg);
+          console.log("Revoked. It was this machine's own token, so this machine is unlinked: link it again with another token to keep sending sessions.");
+        } else {
+          console.log("Revoked. That token stopped working at once, in the browser too.");
+        }
+        return;
+      }
       if (sub === "unlink") {
         delete cfg.server;
         saveConfig(cfg);
         console.log("This machine no longer sends sessions to a server.");
         return;
       }
-      throw new Error("Usage: tracemind cloud setup|link|token|unlink");
+      throw new Error("Usage: tracemind cloud setup|link|token|tokens|revoke|unlink");
     }
 
     case "serve": {
