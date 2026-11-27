@@ -13,7 +13,7 @@ import { LEVEL_CLASS, dayLabel, plural, sessionsLevel, when } from "@/lib/format
 import { cn } from "@/lib/utils";
 import { useWindow } from "@/lib/window";
 
-/** Issue | trend | sessions | fix | first ever | last seen. Phones keep issue and sessions. */
+/** Issue | sessions before | sessions, with which way they moved | fix | first ever | last seen. Phones keep issue and sessions. */
 const ISSUE_COLS = "grid items-center gap-x-4 grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[minmax(0,1fr)_112px_88px_84px] lg:grid-cols-[minmax(0,1fr)_112px_88px_84px_76px_76px]";
 
 const causeHref = (g: IssueGroup) => `/issues/${encodeURIComponent(g.issues[0].key)}`;
@@ -41,12 +41,18 @@ function IssueRow({ g }: { g: IssueGroup }) {
           <span className="block truncate text-[12px] text-faint">
             {g.kindLabel}
             {g.tools && <> · <span className="font-mono text-[11px]">{g.tools}</span></>}
-            {g.reopened && <span className="text-fail"> · back after resolved</span>}
+            {g.reopened && <span className="text-foreground"> · back after resolved</span>}
             {!g.reopened && g.status === "resolved" && " · resolved"}
           </span>
         </span>
-        <span className="hidden sm:block"><Trend now={g.sessions} before={g.previous ?? 0} /></span>
-        <span className={cn("text-right text-[13px] num", level)}>{g.sessions}</span>
+        {/* Red is the count past its threshold and nothing else: what is around it is dark or grey. */}
+        <span className="hidden text-[12px] num sm:block">
+          {g.previous ? <span className="text-muted-foreground">{g.previous}</span> : <span className="text-foreground">new</span>}
+        </span>
+        <span className={cn("flex items-baseline justify-end gap-1.5 text-[13px] num", level)}>
+          <Trend now={g.sessions} before={g.previous ?? 0} />
+          {g.sessions}
+        </span>
         <span className="hidden sm:block"><FixMark fix={g.fix} at={g.fixAt} lastSeen={g.lastSeen} /></span>
         <span className="hidden text-right text-[12px] text-muted-foreground num lg:block">{dayLabel(g.firstSeen.slice(0, 10))}</span>
         <span className="hidden text-right text-[12px] text-muted-foreground num lg:block">{when(g.lastSeen)}</span>

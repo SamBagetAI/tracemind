@@ -44,12 +44,19 @@ export function SectionTitle({ children, aside }: { children: React.ReactNode; a
   );
 }
 
-/** Sessions in the period before, with ▲ when it grew since and ▼ when it shrank; "new" when it did not happen before. */
+/**
+ * Which way a count moved since the period before, for the side of the count it is about: ▲ when it
+ * grew, ▼ when it shrank, nothing when it is the same or was not there before. Dark for worse and
+ * faint for better, never red: red is the count itself past its threshold, and nothing else.
+ */
 export function Trend({ now, before }: { now: number; before: number }) {
-  if (before === 0) return now > 0 ? <span className="text-[12px] text-fail">new</span> : null;
-  if (now === before) return <span className="text-[12px] text-muted-foreground num">{before}</span>;
+  if (before === 0 || now === before) return null;
   const up = now > before;
-  return <span className={`text-[12px] num ${up ? "text-fail" : "text-muted-foreground"}`}>{before} {up ? "▲" : "▼"}</span>;
+  return (
+    <span role="img" aria-label={up ? "up from the period before" : "down from the period before"} className={cn("text-[10px]", up ? "text-foreground" : "text-faint")}>
+      {up ? "▲" : "▼"}
+    </span>
+  );
 }
 
 /**
@@ -75,8 +82,9 @@ export function FixMark({ fix, at, lastSeen }: { fix?: "ready" | "applied" | nul
   // An applied fix is not a fixed issue: say whether the issue came back after it.
   if (fix === "applied") {
     const since = at && lastSeen && lastSeen > at;
+    // Amber, as the Fixes page shows a fix that has not stopped its issue: not the red of a count.
     return since ? (
-      <span className="text-[12px] text-fail" title={`Fix applied ${at.slice(0, 10)}; the issue happened again after it.`}>seen since fix</span>
+      <span className="text-[12px] text-warn" title={`Fix applied ${at.slice(0, 10)}; the issue happened again after it.`}>seen since fix</span>
     ) : (
       <span className="inline-flex items-center gap-1 text-[12px] text-ok" title={at ? `Fix applied ${at.slice(0, 10)}` : undefined}><Check className="size-3" strokeWidth={2.5} />not seen since fix</span>
     );

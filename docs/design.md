@@ -551,6 +551,12 @@ On a subscription nobody pays per token, so the page says "at API prices". Unkno
 highlighter `#ffe58a` under what went wrong, red kept for failures. Schibsted Grotesk for words, IBM Plex
 Mono for machine text. Light is the default; the dark tokens remain for later.
 
+**On the Issues list, red means one thing:** a count past its threshold (5 sessions). It had spread to
+the trend, to "back after resolved" and to "seen since fix", up to four reds in a row. Now the trend is an
+arrow beside the count it is about (dark when it grew, faint when it shrank), with the period before as a
+plain number or "new"; "back after resolved" is dark text; and "seen since fix" is amber, as the Fixes
+page shows a fix that has not stopped its issue.
+
 **Grey text reads.** It is `#6b6b68`, and `#6e6e6b` for the smallest labels (step numbers, times, units):
 the lightest that keeps 4.5:1 on every background it sits on, hovered and open rows included. A test
 checks both greys in both sets of tokens (`test/colors.test.ts`).
