@@ -8,9 +8,8 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useApi, type Session } from "@/lib/api";
 import { useViewer } from "@/lib/viewer";
 import { plural, projectName } from "@/lib/format";
+import { ALL, filterSessions, peopleOf } from "@/lib/sessions";
 import { useWindow } from "@/lib/window";
-
-const ALL = "__all";
 
 export function SessionsPage() {
   const { days } = useWindow();
@@ -20,21 +19,16 @@ export function SessionsPage() {
   const list = useApi<Session[]>(`/sessions?limit=2000&marks=1&days=${days}&kind=${kind}`);
   const me = useViewer();
   const [project, setProject] = useState(ALL);
+  const [person, setPerson] = useState(ALL);
   const [show, setShow] = useState(params.get("show") ?? "all");
   const [q, setQ] = useState("");
 
   const projects = useMemo(() => [...new Set((list.data ?? []).map((s) => s.project))].sort((a, b) => projectName(a).localeCompare(projectName(b))), [list.data]);
-  const shown = useMemo(
-    () =>
-      (list.data ?? []).filter(
-        (s) =>
-          (project === ALL || s.project === project) &&
-          (show === "all" || (show === "issues" ? s.issueCount > 0 : s.issueCount === 0)) &&
-          (!q || s.title.toLowerCase().includes(q.toLowerCase())),
-      ),
-    [list.data, project, show, q],
-  );
-  const people = new Set((list.data ?? []).map((s) => s.person));
+  // Whose sessions: offered once the list holds more than one person (a shared server, mostly).
+  const people = useMemo(() => peopleOf(list.data ?? []), [list.data]);
+  // Someone chosen who has no session in this window or kind: everyone again, not an empty choice.
+  const who = people.includes(person) ? person : ALL;
+  const shown = useMemo(() => filterSessions(list.data ?? [], { project, person: who, show, q }), [list.data, project, who, show, q]);
 
   return (
     <Page title={kind === "routines" ? "Routine runs" : "Sessions"} lead={list.data && <span className="text-[13px] num">{plural(list.data.length, kind === "routines" ? "routine run" : "session")} started in the last {days} days</span>}>
@@ -61,13 +55,29 @@ export function SessionsPage() {
             ))}
           </SelectContent>
         </Select>
-        <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter by title" className="h-8 w-full sm:ml-auto sm:w-64" aria-label="Filter by title" />
+        {people.length > 1 && (
+          <Select value={who} onValueChange={setPerson}>
+            <SelectTrigger size="sm" className="h-8 w-full sm:w-44" aria-label="Person">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>Everyone</SelectItem>
+              {people.map((p) => (
+                <SelectItem key={p} value={p}>
+                  {p}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+        {/* Takes what is left of the row, up to its usual width, so one more filter does not push it to a line of its own. */}
+        <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter by title" className="h-8 w-full sm:ml-auto sm:w-auto sm:max-w-64 sm:min-w-40 sm:flex-1" aria-label="Filter by title" />
       </div>
       {list.error && <Failed error={list.error} />}
       {!list.data && !list.error && <Loading rows={12} />}
       {list.data && (
         <div>
-          {shown.length ? <SessionsTable sessions={shown} showPerson={people.size > 1 || me?.mode === "server"} /> : <Empty>No session matches.</Empty>}
+          {shown.length ? <SessionsTable sessions={shown} showPerson={people.length > 1 || me?.mode === "server"} /> : <Empty>No session matches.</Empty>}
           {shown.length !== list.data.length && (
             <p className="mt-2 text-[12px] text-faint num">
               {shown.length.toLocaleString("en-US")} of {list.data.length.toLocaleString("en-US")} shown

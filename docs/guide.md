@@ -38,7 +38,8 @@ The server is the same app on Postgres, with workspaces and tokens.
    browser too. The last admin token of a workspace cannot be revoked.
 
 People sign in to the web UI with their token. On a server, a session is filed under the person
-who owns the token that sent it, whatever the client says.
+who owns the token that sent it, whatever the client says. The Sessions page says who ran each
+session, and can show one person's.
 
 ## Routines
 
